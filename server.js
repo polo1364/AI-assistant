@@ -152,6 +152,14 @@ function cleanupPendingWrites() {
   }
 }
 
+function isSensitiveWorkRequest(goal) {
+  const text = String(goal || "");
+  const asksToRead = /讀取|查看|打開|顯示|列出|取得|看一下|內容/i.test(text);
+  const mentionsSensitive =
+    /\.env\b|secret|credential|password|cookie|private|token|api[_\s-]?key|金鑰|密碼|憑證/i.test(text);
+  return asksToRead && mentionsSensitive;
+}
+
 function buildWorkPlan(goal, files) {
   const relevantFiles = pickRelevantFiles(goal, files);
   const steps = [
@@ -1107,6 +1115,11 @@ app.post("/api/plan", async (req, res) => {
     const { goal } = req.body || {};
     if (!String(goal || "").trim()) {
       return res.status(400).json({ error: "缺少工作目標。" });
+    }
+    if (isSensitiveWorkRequest(goal)) {
+      return res.status(400).json({
+        error: "這個工作目標涉及讀取敏感檔案或憑證資訊，工作 Agent 第一版不允許規劃此類操作。"
+      });
     }
 
     const files = await listProjectFiles();

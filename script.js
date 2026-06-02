@@ -358,7 +358,7 @@ function renderWorkPlan(plan) {
   const box = document.getElementById("workPlanBox");
   const steps = (plan.steps || []).map((step, index) => {
     const pathText = step.path ? ` <code>${escapeHtml(String(step.path))}</code>` : "";
-    return `<li><strong>${index + 1}. ${escapeHtml(step.tool)}</strong>${pathText}<br><span>${escapeHtml(step.reason || "")}</span></li>`;
+    return `<li><strong>${escapeHtml(step.tool)}</strong>${pathText}<br><span>${escapeHtml(step.reason || "")}</span></li>`;
   }).join("");
 
   box.innerHTML = `
