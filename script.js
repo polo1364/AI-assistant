@@ -642,23 +642,6 @@ function addMessage(role, text, sources, steps, confidence) {
       div.appendChild(box);
     }
 
-    if (Array.isArray(steps) && steps.length > 0) {
-      const trace = document.createElement("div");
-      trace.className = "agent-trace";
-      const traceTitle = document.createElement("div");
-      traceTitle.className = "agent-trace-title";
-      traceTitle.textContent = "Agent 流程";
-      trace.appendChild(traceTitle);
-      const list = document.createElement("ol");
-      steps.forEach((step) => {
-        const li = document.createElement("li");
-        li.textContent = step;
-        list.appendChild(li);
-      });
-      trace.appendChild(list);
-      div.appendChild(trace);
-    }
-
     if (Array.isArray(sources) && sources.length > 0) {
       const box = document.createElement("div");
       box.className = "sources";

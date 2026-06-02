@@ -3,17 +3,18 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>蝦蝦AI助理</title>
+  <title>蝦蝦智能助理</title>
   <link rel="manifest" href="manifest.json" />
-  <meta name="theme-color" content="#111827" />
-  <link rel="stylesheet" href="style.css" />
+  <meta name="theme-color" content="#12091f" />
+  <link rel="stylesheet" href="style.css?v=xiaxia-game-ui-1" />
 </head>
 <body>
   <div class="app">
     <header class="app-header">
       <div class="title-block">
-        <h1>蝦蝦AI助理</h1>
-        <p>整合查詢、整理與回覆的智能工作助理</p>
+        <div class="deck-badge">XiaXia Command Deck</div>
+        <h1>蝦蝦智能助理</h1>
+        <p>專屬任務控制台，整合查詢、整理與高準確回覆</p>
       </div>
       <div class="header-actions">
         <button id="usageBtn" class="icon-btn" title="用量 / 花費">用量</button>
@@ -47,7 +48,7 @@
 
     <main id="chatBox" class="chat-box">
       <div class="message ai">
-        你好，我是你的 Qwen AI 助理。請輸入你想整理的內容。需要查最新資料時，打開上方「聯網搜尋」。
+        指令艙已啟動。請輸入想整理、查詢或驗證的內容；需要最新資料時，可將搜尋模式切換為「自動」或「強制搜尋」。
       </div>
     </main>
 
@@ -209,6 +210,6 @@
     </div>
   </div>
 
-  <script src="script.js?v=answer-mode-1"></script>
+  <script src="script.js?v=hide-agent-trace-1"></script>
 </body>
 </html>
