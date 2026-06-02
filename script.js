@@ -1,7 +1,7 @@
 const chatBox = document.getElementById("chatBox");
 const userInput = document.getElementById("userInput");
 const sendBtn = document.getElementById("sendBtn");
-const searchToggle = document.getElementById("searchToggle");
+const searchModeSelect = document.getElementById("searchMode");
 
 const SETTINGS_KEY = "qwen_assistant_settings";
 const USAGE_KEY = "qwen_assistant_usage";
@@ -15,7 +15,8 @@ const defaultSettings = {
   priceOut: 0,
   priceSearch: 0,
   currency: "USD",
-  search: false
+  searchMode: "auto",
+  memoryTurns: 6
 };
 
 const emptyUsage = () => ({
@@ -29,6 +30,8 @@ let usage = {
   session: emptyUsage(),
   total: emptyUsage()
 };
+
+let conversation = [];
 
 const DB_NAME = "qwen_assistant_db";
 const DB_VERSION = 1;
@@ -224,7 +227,8 @@ function saveSettings() {
     priceOut: parseFloat(document.getElementById("priceOut").value) || 0,
     priceSearch: parseFloat(document.getElementById("priceSearch").value) || 0,
     currency: document.getElementById("currency").value.trim() || "USD",
-    search: searchToggle.checked
+    searchMode: searchModeSelect.value,
+    memoryTurns: Math.max(0, parseInt(document.getElementById("memoryTurns").value, 10) || 0)
   };
   localStorage.setItem(SETTINGS_KEY, JSON.stringify(s));
   closeModal("settingsModal");
@@ -240,6 +244,7 @@ function fillSettingsForm() {
   document.getElementById("priceOut").value = s.priceOut || "";
   document.getElementById("priceSearch").value = s.priceSearch || "";
   document.getElementById("currency").value = s.currency;
+  document.getElementById("memoryTurns").value = s.memoryTurns ?? 6;
 }
 
 function clearKeys() {
@@ -269,12 +274,12 @@ function persistUsage() {
   localStorage.setItem(USAGE_KEY, JSON.stringify({ total: usage.total }));
 }
 
-function recordUsage({ inTokens = 0, outTokens = 0, totalTokens = 0, searched = false }) {
+function recordUsage({ inTokens = 0, outTokens = 0, totalTokens = 0, searched = false, searchCount = 0 }) {
   for (const bucket of [usage.session, usage.total]) {
     bucket.inTokens += inTokens;
     bucket.outTokens += outTokens;
     bucket.totalTokens += totalTokens || inTokens + outTokens;
-    if (searched) bucket.searches += 1;
+    bucket.searches += searchCount || (searched ? 1 : 0);
   }
   persistUsage();
   renderUsage();
@@ -657,6 +662,22 @@ function addMessage(role, text, sources) {
   chatBox.scrollTop = chatBox.scrollHeight;
 }
 
+function getRecentMessages(nextUserText) {
+  const s = getSettings();
+  const limit = Math.max(0, Number(s.memoryTurns ?? 6));
+  const recent = limit === 0 ? [] : conversation.slice(-limit);
+  return [...recent, { role: "user", content: nextUserText }];
+}
+
+function resetConversation() {
+  conversation = [];
+  chatBox.innerHTML = "";
+  const div = document.createElement("div");
+  div.className = "message ai";
+  div.textContent = "已開始新對話。請輸入你想整理或查詢的內容。";
+  chatBox.appendChild(div);
+}
+
 async function sendMessage() {
   const text = userInput.value.trim();
   if (!text) {
@@ -671,12 +692,13 @@ async function sendMessage() {
     return;
   }
 
-  const useSearch = searchToggle.checked;
-  if (useSearch && !s.tavilyKey) {
-    alert("已開啟聯網搜尋，但尚未填入 Tavily API Key。請到「設定」填入，或關閉聯網搜尋。");
+  const searchMode = searchModeSelect.value;
+  if (searchMode !== "off" && !s.tavilyKey) {
+    alert("目前搜尋模式需要 Tavily API Key。請到「設定」填入，或改成「關閉」。");
     openModal("settingsModal");
     return;
   }
+  const requestMessages = getRecentMessages(text);
 
   addMessage("user", text);
   userInput.value = "";
@@ -684,7 +706,7 @@ async function sendMessage() {
   sendBtn.disabled = true;
   sendBtn.textContent = "等待";
 
-  const typingEl = addTyping(useSearch ? "聯網搜尋並整理中" : "思考中");
+  const typingEl = addTyping(searchMode === "off" ? "思考中" : searchMode === "auto" ? "Agent 判斷是否搜尋中" : "聯網搜尋並整理中");
 
   try {
     const response = await fetch("/api/ask", {
@@ -692,7 +714,8 @@ async function sendMessage() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         message: text,
-        useSearch,
+        messages: requestMessages,
+        searchMode,
         qwenKey: s.qwenKey,
         tavilyKey: s.tavilyKey,
         model: s.model,
@@ -711,14 +734,15 @@ async function sendMessage() {
         inTokens: data.usage?.prompt_tokens || 0,
         outTokens: data.usage?.completion_tokens || 0,
         totalTokens: data.usage?.total_tokens || 0,
-        searched: useSearch
+        searchCount: data.searchCount || 0
       });
+      conversation.push({ role: "user", content: text }, { role: "assistant", content: data.reply });
       saveHistory({
         ts: Date.now(),
         question: text,
         reply: data.reply,
         sources: data.sources || [],
-        searched: useSearch
+        searched: (data.searchCount || 0) > 0
       });
     } else {
       addMessage("ai", "沒有收到 Qwen 回覆，請檢查 API Key 或模型設定。");
@@ -765,6 +789,7 @@ document.getElementById("settingsBtn").onclick = () => openModal("settingsModal"
 document.getElementById("usageBtn").onclick = () => openModal("usageModal");
 document.getElementById("templatesBtn").onclick = () => openModal("templatesModal");
 document.getElementById("historyBtn").onclick = () => openModal("historyModal");
+document.getElementById("newChatBtn").onclick = resetConversation;
 
 ["settingsModal", "usageModal", "templatesModal", "historyModal"].forEach((id) => {
   const overlay = document.getElementById(id);
@@ -773,9 +798,9 @@ document.getElementById("historyBtn").onclick = () => openModal("historyModal");
   });
 });
 
-searchToggle.addEventListener("change", () => {
+searchModeSelect.addEventListener("change", () => {
   const s = getSettings();
-  s.search = searchToggle.checked;
+  s.searchMode = searchModeSelect.value;
   localStorage.setItem(SETTINGS_KEY, JSON.stringify(s));
 });
 
@@ -791,7 +816,7 @@ userInput.addEventListener("keydown", function (e) {
 /* ---------- 初始化 ---------- */
 (async function init() {
   const s = getSettings();
-  searchToggle.checked = !!s.search;
+  searchModeSelect.value = s.searchMode || (s.search ? "force" : "auto");
   loadUsage();
   renderUsage();
   try {

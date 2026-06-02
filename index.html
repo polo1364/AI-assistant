@@ -22,12 +22,16 @@
     </header>
 
     <div class="toolbar">
-      <label class="switch">
-        <input type="checkbox" id="searchToggle" />
-        <span class="slider"></span>
-        <span class="switch-label">聯網搜尋</span>
+      <label class="mode-field">
+        <span>搜尋模式</span>
+        <select id="searchMode" class="mode-select">
+          <option value="off">關閉（最省）</option>
+          <option value="auto">自動（Agent 判斷）</option>
+          <option value="force">強制搜尋</option>
+        </select>
       </label>
       <div class="toolbar-actions">
+        <button id="newChatBtn" class="chip-btn">新對話</button>
         <button id="templatesBtn" class="chip-btn">模板</button>
         <button id="historyBtn" class="chip-btn">歷史</button>
       </div>
@@ -73,6 +77,10 @@
             <option value="qwen-plus">qwen-plus</option>
             <option value="qwen3-max">qwen3-max（最強）</option>
           </select>
+        </label>
+        <label class="field">
+          <span>對話記憶則數（0 = 不帶記憶，最省）</span>
+          <input type="number" id="memoryTurns" min="0" max="20" step="1" placeholder="6" />
         </label>
 
         <div class="field-group">
