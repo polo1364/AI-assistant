@@ -310,23 +310,40 @@ function validateAnswer(reply) {
   return [...new Set(violations)];
 }
 
-function buildConfidence({ sources, violations, searchCount }) {
+function isHighRiskQuestion(text) {
+  return /最新|目前|現在|價格|計費|費用|官方|API|限制|規定|政策|法律|醫療|藥物|部署|帳號|權限|金鑰|Key|token|安全|付款|投資/i.test(String(text || ""));
+}
+
+function buildConfidence({ sources, violations, searchCount, userMessages }) {
+  const latest = userMessages?.[userMessages.length - 1]?.content || "";
   const officialCount = (sources || []).filter((s) => s.official).length;
   const sourceCount = (sources || []).length;
+  const highRisk = isHighRiskQuestion(latest);
+
   if (violations.length > 0) {
     return {
       level: "low",
       label: "低",
-      reason: `程式驗證仍發現 ${violations.length} 個風險，建議人工確認。`
+      reason: `仍發現 ${violations.length} 個風險，建議人工確認。`
     };
   }
-  if (officialCount > 0) {
+
+  if (highRisk && officialCount > 0) {
     return {
       level: "high",
       label: "高",
-      reason: `使用 ${officialCount} 個官方來源，且未發現專案事實衝突。`
+      reason: `此問題屬於高變動或高風險資訊，已使用 ${officialCount} 個官方來源。`
     };
   }
+
+  if (highRisk && officialCount === 0) {
+    return {
+      level: "low",
+      label: "低",
+      reason: "此問題需要官方來源或明確證據，但目前沒有官方來源。"
+    };
+  }
+
   if (sourceCount > 0) {
     return {
       level: "medium",
@@ -335,17 +352,50 @@ function buildConfidence({ sources, violations, searchCount }) {
     };
   }
   return {
-    level: searchCount > 0 ? "medium" : "medium",
+    level: "medium",
     label: "中",
-    reason: searchCount > 0 ? "已執行搜尋但來源不足。" : "未使用外部來源，主要依據模型知識與專案事實。"
+    reason: "未使用外部來源，主要依據使用者提供內容與專案固定事實。"
   };
 }
 
-async function callQwen({ baseUrl, qwenKey, model, messages, tools, toolChoice }) {
+function shouldRefuseOrDefer({ sources, searchMode, userMessages, violations }) {
+  const latest = userMessages?.[userMessages.length - 1]?.content || "";
+  const highRisk = isHighRiskQuestion(latest);
+  const hasSources = Array.isArray(sources) && sources.length > 0;
+  const hasOfficial = hasSources && sources.some((s) => s.official);
+
+  if (violations && violations.length > 0) {
+    return {
+      defer: true,
+      reason: `仍有 ${violations.length} 個驗證風險。`
+    };
+  }
+
+  if (highRisk && searchMode === "off") {
+    return {
+      defer: true,
+      reason: "這題屬於高風險或高變動資訊，但目前未開啟查證模式。"
+    };
+  }
+
+  if (highRisk && searchMode !== "off" && !hasOfficial) {
+    return {
+      defer: true,
+      reason: "這題需要官方來源或明確證據，但目前沒有取得官方來源。"
+    };
+  }
+
+  return {
+    defer: false,
+    reason: ""
+  };
+}
+
+async function callQwen({ baseUrl, qwenKey, model, messages, tools, toolChoice, temperature = 0.2 }) {
   const body = {
     model,
     messages,
-    temperature: 0.5
+    temperature
   };
   if (tools) body.tools = tools;
   if (toolChoice && tools) body.tool_choice = toolChoice;
@@ -388,7 +438,7 @@ function fallbackPlan(userMessages, searchMode) {
     searchMode === "force" ||
     (searchMode === "auto" && (
       route.officialPreferred ||
-      /最新|目前|現在|官方|價格|限制|部署|支援|是否|查詢|比較|研究/i.test(latest)
+      /最新|目前|現在|官方|價格|計費|費用|限制|部署|支援|是否|查詢|比較|研究|規定|政策|版本|模型|API|文件|docs|documentation|安全|風險|金鑰|Key|token|SSL|網域|權限/i.test(latest)
     ));
   const queries = route.profiles.length
     ? route.profiles.map((p) => {
@@ -430,7 +480,8 @@ async function createAgentPlan({ userMessages, qwenKey, model, baseUrl, searchMo
       messages: [
         { role: "system", content: SYSTEM_PROMPT },
         { role: "user", content: plannerPrompt }
-      ]
+      ],
+      temperature: 0.1
     });
     const json = safeJsonParse(planned.choices?.[0]?.message?.content);
     if (!json) return { ...fallback, usage: planned.usage || null };
@@ -483,7 +534,8 @@ async function executePlannedSearch({ plan, userMessages, qwenKey, tavilyKey, mo
       { role: "system", content: SEARCH_SYSTEM_PROMPT },
       ...userMessages.slice(0, -1),
       { role: "user", content: finalPrompt }
-    ]
+    ],
+    temperature: 0.1
   });
   mergeUsage(aggregateUsage, final.usage);
   steps.push("Writer：Qwen 根據計畫與搜尋證據產生回答");
@@ -495,8 +547,22 @@ async function executePlannedSearch({ plan, userMessages, qwenKey, tavilyKey, mo
   };
 }
 
-function shouldSelfCheck({ searchMode, sources, userMessages }) {
+function shouldSelfCheck({ searchMode, userMessages, answerMode }) {
+  const latest = userMessages?.[userMessages.length - 1]?.content || "";
+  if (answerMode === "fast") {
+    return searchMode !== "off" || isHighRiskQuestion(latest);
+  }
   return true;
+}
+
+function answerTemperature({ searchMode, answerMode, latest, taskType }) {
+  const creative =
+    taskType === "general_write" ||
+    /文案|創作|故事|貼文|廣告|標語|slogan|命名|社群|行銷|企劃|改寫|潤飾|copy/i.test(String(latest || ""));
+
+  if (searchMode !== "off" || answerMode === "precise" || isHighRiskQuestion(latest)) return 0.1;
+  if (creative) return 0.7;
+  return 0.2;
 }
 
 function sourceSummary(sources) {
@@ -538,7 +604,8 @@ async function selfCheckAnswer({ reply, sources, userMessages, qwenKey, model, b
       { role: "system", content: SYSTEM_PROMPT },
       { role: "user", content: checkPrompt }
     ],
-    toolChoice: "none"
+    toolChoice: "none",
+    temperature: 0.1
   });
 
   return {
@@ -570,7 +637,8 @@ async function repairAnswer({ reply, violations, sources, userMessages, qwenKey,
     messages: [
       { role: "system", content: SYSTEM_PROMPT },
       { role: "user", content: repairPrompt }
-    ]
+    ],
+    temperature: 0.1
   });
 
   return {
@@ -598,7 +666,8 @@ async function runForceSearch({ userMessages, qwenKey, tavilyKey, model, baseUrl
       { role: "system", content: SEARCH_SYSTEM_PROMPT },
       ...userMessages.slice(0, -1),
       { role: "user", content: `${built.context}\n---\n使用者問題：${latestUser}` }
-    ]
+    ],
+    temperature: 0.1
   });
 
   return {
@@ -610,13 +679,14 @@ async function runForceSearch({ userMessages, qwenKey, tavilyKey, model, baseUrl
   };
 }
 
-async function runAgentSearch({ userMessages, qwenKey, tavilyKey, model, baseUrl, searchMode }) {
+async function runAgentSearch({ userMessages, qwenKey, tavilyKey, model, baseUrl, searchMode, answerMode }) {
   const aggregateUsage = { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 };
   const sources = [];
   const steps = [];
   let searchCount = 0;
   const latestUser = [...userMessages].reverse().find((m) => m.role === "user")?.content || "";
   const route = classifySearch(latestUser);
+  let plannedTaskType = route.profiles[0] || "general";
 
   if (searchMode === "force") {
     const result = await runForceSearch({ userMessages, qwenKey, tavilyKey, model, baseUrl });
@@ -626,6 +696,7 @@ async function runAgentSearch({ userMessages, qwenKey, tavilyKey, model, baseUrl
 
   if (searchMode === "auto") {
     const plan = await createAgentPlan({ userMessages, qwenKey, model, baseUrl, searchMode });
+    plannedTaskType = plan.taskType || plannedTaskType;
     mergeUsage(aggregateUsage, plan.usage);
     steps.push(`Planner JSON：taskType=${plan.taskType}, needsSearch=${plan.needsSearch ? "yes" : "no"}`);
     if (Array.isArray(plan.queries) && plan.queries.length > 0) {
@@ -663,7 +734,13 @@ async function runAgentSearch({ userMessages, qwenKey, tavilyKey, model, baseUrl
     model,
     messages,
     tools: searchMode === "auto" ? [WEB_SEARCH_TOOL] : undefined,
-    toolChoice: searchMode === "auto" ? "auto" : undefined
+    toolChoice: searchMode === "auto" ? "auto" : undefined,
+    temperature: searchMode === "auto" ? 0.1 : answerTemperature({
+      searchMode,
+      answerMode,
+      latest: latestUser,
+      taskType: plannedTaskType
+    })
   });
   mergeUsage(aggregateUsage, first.usage);
 
@@ -713,7 +790,8 @@ async function runAgentSearch({ userMessages, qwenKey, tavilyKey, model, baseUrl
       model,
       messages,
       tools: [WEB_SEARCH_TOOL],
-      toolChoice: "auto"
+      toolChoice: "auto",
+      temperature: 0.1
     });
     mergeUsage(aggregateUsage, next.usage);
     assistantMessage = next.choices?.[0]?.message;
@@ -744,7 +822,8 @@ async function runAgentSearch({ userMessages, qwenKey, tavilyKey, model, baseUrl
     qwenKey,
     model,
     messages,
-    toolChoice: "none"
+    toolChoice: "none",
+    temperature: 0.1
   });
   mergeUsage(aggregateUsage, finalWithoutTools.usage);
   const finalMessage = finalWithoutTools.choices?.[0]?.message;
@@ -761,7 +840,7 @@ async function runAgentSearch({ userMessages, qwenKey, tavilyKey, model, baseUrl
 
 app.post("/api/ask", async (req, res) => {
   try {
-    const { message, messages, searchMode, useSearch, qwenKey, tavilyKey, model, baseUrl } = req.body || {};
+    const { message, messages, searchMode, answerMode, useSearch, qwenKey, tavilyKey, model, baseUrl } = req.body || {};
     const normalizedMessages = normalizeMessages(message, messages);
 
     if (normalizedMessages.length === 0 || !normalizedMessages.some((m) => m.role === "user" && m.content.trim())) {
@@ -773,7 +852,20 @@ app.post("/api/ask", async (req, res) => {
 
     const usedModel = model || "qwen-flash";
     const usedBaseUrl = baseUrl || "https://dashscope-intl.aliyuncs.com/compatible-mode/v1";
-    const usedSearchMode = searchMode || (useSearch ? "force" : "off");
+    const usedAnswerMode = ["fast", "verified", "precise"].includes(answerMode) ? answerMode : "verified";
+    const reviewModel = usedAnswerMode === "precise" ? "qwen-plus" : usedModel;
+    let usedSearchMode = searchMode || (useSearch ? "force" : "off");
+    const latestQuestion = normalizedMessages[normalizedMessages.length - 1]?.content || "";
+
+    if (usedAnswerMode === "precise" && isHighRiskQuestion(latestQuestion) && !tavilyKey) {
+      return res.status(400).json({
+        error: "高準確模式處理高風險問題需要 Tavily API Key，請先填入 Tavily Key 或改用快速模式。"
+      });
+    }
+
+    if (usedAnswerMode === "precise" && usedSearchMode === "off" && tavilyKey && isHighRiskQuestion(latestQuestion)) {
+      usedSearchMode = "auto";
+    }
 
     if (usedSearchMode !== "off") {
       if (!tavilyKey) {
@@ -787,17 +879,18 @@ app.post("/api/ask", async (req, res) => {
       tavilyKey,
       model: usedModel,
       baseUrl: usedBaseUrl,
-      searchMode: usedSearchMode
+      searchMode: usedSearchMode,
+      answerMode: usedAnswerMode
     });
 
-    if (shouldSelfCheck({ searchMode: usedSearchMode, sources: result.sources, userMessages: normalizedMessages })) {
+    if (shouldSelfCheck({ searchMode: usedSearchMode, userMessages: normalizedMessages, answerMode: usedAnswerMode })) {
       result.steps = [...(result.steps || []), "執行最終自我檢查，修正來源與專案事實"];
       const checked = await selfCheckAnswer({
         reply: result.reply,
         sources: result.sources,
         userMessages: normalizedMessages,
         qwenKey,
-        model: usedModel,
+        model: reviewModel,
         baseUrl: usedBaseUrl
       });
       result.reply = checked.reply;
@@ -821,10 +914,25 @@ app.post("/api/ask", async (req, res) => {
     }
 
     const finalViolations = validateAnswer(result.reply);
+    const deferCheck = usedAnswerMode === "fast" && !isHighRiskQuestion(latestQuestion)
+      ? { defer: false, reason: "" }
+      : shouldRefuseOrDefer({
+      sources: result.sources,
+      searchMode: usedSearchMode,
+      userMessages: normalizedMessages,
+      violations: finalViolations
+    });
+    if (deferCheck.defer) {
+      result.reply =
+        `這題我不能下 100% 結論。\n\n原因：${deferCheck.reason}\n\n建議：請開啟查證模式、提供官方資料，或改用高準確模式後再判斷。`;
+      result.steps = [...(result.steps || []), `Defer：${deferCheck.reason}`];
+    }
+
     const confidence = buildConfidence({
       sources: result.sources,
       violations: finalViolations,
-      searchCount: result.searchCount || 0
+      searchCount: result.searchCount || 0,
+      userMessages: normalizedMessages
     });
     result.steps = [
       ...(result.steps || []),
@@ -839,6 +947,7 @@ app.post("/api/ask", async (req, res) => {
       usage: result.usage,
       searchCount: result.searchCount || 0,
       searchMode: usedSearchMode,
+      answerMode: usedAnswerMode,
       steps: result.steps || [],
       confidence
     });

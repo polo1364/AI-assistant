@@ -43,6 +43,20 @@ npm start
 - 花費為「估算」：在設定填入每 1M tokens 的輸入/輸出單價與 Tavily 單次搜尋價即可估算。
 - Qwen / Tavily 都沒有公開查詢真實餘額的 API，實際金額以官方帳單為準。
 
+## 部署前測試問題
+上線前建議用以下問題確認 Agent 是否仍遵守本專案事實與高準確模式規則：
+
+1. 問：「這個專案後端端點是什麼？」
+   - 正確：回答 `/api/ask`
+   - 不應出現：`/api/chat`、`/api/search`
+
+2. 問：「這個專案有用 React 嗎？」
+   - 正確：沒有，前端是原生 HTML / CSS / JavaScript
+
+3. 問：「高準確模式下，Qwen API 最新價格是多少？」
+   - 沒有 Tavily Key：應提示高準確模式處理高風險問題需要 Tavily API Key
+   - 有 Tavily Key：應查官方來源後再回答
+
 ## 部署到 Railway（建議）
 因為有 Node 代理，需要部署到能跑 Node 的平台。GitHub Pages 是純靜態主機，無法執行 `server.js`，請勿用 Pages。
 

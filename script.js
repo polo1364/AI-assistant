@@ -2,6 +2,7 @@ const chatBox = document.getElementById("chatBox");
 const userInput = document.getElementById("userInput");
 const sendBtn = document.getElementById("sendBtn");
 const searchModeSelect = document.getElementById("searchMode");
+const answerModeSelect = document.getElementById("answerMode");
 
 const SETTINGS_KEY = "qwen_assistant_settings";
 const USAGE_KEY = "qwen_assistant_usage";
@@ -16,6 +17,7 @@ const defaultSettings = {
   priceSearch: 0,
   currency: "USD",
   searchMode: "auto",
+  answerMode: "verified",
   memoryTurns: 6
 };
 
@@ -228,6 +230,7 @@ function saveSettings() {
     priceSearch: parseFloat(document.getElementById("priceSearch").value) || 0,
     currency: document.getElementById("currency").value.trim() || "USD",
     searchMode: searchModeSelect.value,
+    answerMode: answerModeSelect.value,
     memoryTurns: Math.max(0, parseInt(document.getElementById("memoryTurns").value, 10) || 0)
   };
   localStorage.setItem(SETTINGS_KEY, JSON.stringify(s));
@@ -494,7 +497,7 @@ async function renderHistory() {
     loadBtn.textContent = "載入";
     loadBtn.onclick = () => {
       addMessage("user", r.question);
-      addMessage("ai", r.reply, r.sources, r.steps);
+      addMessage("ai", r.reply, r.sources, r.steps, r.confidence);
       closeModal("historyModal");
     };
 
@@ -611,7 +614,7 @@ function renderMarkdown(md) {
   return html;
 }
 
-function addMessage(role, text, sources, steps) {
+function addMessage(role, text, sources, steps, confidence) {
   const div = document.createElement("div");
   div.className = `message ${role}`;
 
@@ -625,6 +628,20 @@ function addMessage(role, text, sources, steps) {
   div.appendChild(body);
 
   if (role === "ai") {
+    if (confidence && confidence.label) {
+      const box = document.createElement("div");
+      box.className = `confidence-card confidence-${confidence.level || "medium"}`;
+      const title = document.createElement("div");
+      title.className = "confidence-title";
+      title.textContent = `可信度：${confidence.label}`;
+      const reason = document.createElement("div");
+      reason.className = "confidence-reason";
+      reason.textContent = confidence.reason || "";
+      box.appendChild(title);
+      box.appendChild(reason);
+      div.appendChild(box);
+    }
+
     if (Array.isArray(steps) && steps.length > 0) {
       const trace = document.createElement("div");
       trace.className = "agent-trace";
@@ -750,6 +767,7 @@ async function sendMessage() {
         message: text,
         messages: requestMessages,
         searchMode,
+        answerMode: answerModeSelect.value,
         qwenKey: s.qwenKey,
         tavilyKey: s.tavilyKey,
         model: s.model,
@@ -766,7 +784,7 @@ async function sendMessage() {
       const agentSteps = Array.isArray(data.steps) && data.steps.length > 0
         ? data.steps
         : fallbackAgentSteps(searchMode, data.searchCount || 0);
-      addMessage("ai", data.reply, data.sources, agentSteps);
+      addMessage("ai", data.reply, data.sources, agentSteps, data.confidence);
       recordUsage({
         inTokens: data.usage?.prompt_tokens || 0,
         outTokens: data.usage?.completion_tokens || 0,
@@ -780,6 +798,7 @@ async function sendMessage() {
         reply: data.reply,
         sources: data.sources || [],
         steps: agentSteps,
+        confidence: data.confidence,
         searched: (data.searchCount || 0) > 0
       });
     } else {
@@ -842,6 +861,12 @@ searchModeSelect.addEventListener("change", () => {
   localStorage.setItem(SETTINGS_KEY, JSON.stringify(s));
 });
 
+answerModeSelect.addEventListener("change", () => {
+  const s = getSettings();
+  s.answerMode = answerModeSelect.value;
+  localStorage.setItem(SETTINGS_KEY, JSON.stringify(s));
+});
+
 userInput.addEventListener("input", autoGrowInput);
 
 userInput.addEventListener("keydown", function (e) {
@@ -855,6 +880,7 @@ userInput.addEventListener("keydown", function (e) {
 (async function init() {
   const s = getSettings();
   searchModeSelect.value = s.searchMode || (s.search ? "force" : "auto");
+  answerModeSelect.value = s.answerMode || "verified";
   loadUsage();
   renderUsage();
   try {
