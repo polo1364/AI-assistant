@@ -480,10 +480,12 @@ async function confirmWorkWrite(token, button) {
     button.textContent = "已寫入";
     button.classList.add("written");
     status.classList.add("success");
+    const writeTime = data.lastWriteTime ? new Date(data.lastWriteTime).toLocaleString() : "";
+    const hashText = data.writtenHash ? ` / hash ${String(data.writtenHash).slice(0, 8)}` : "";
     status.textContent = data.verified
-      ? `已寫入並驗證成功：${data.path}`
+      ? `已寫入並驗證成功：${data.path}${writeTime ? ` / ${writeTime}` : ""}${hashText}`
       : `已寫入：${data.path}`;
-    addMessage("ai", `工作 Agent 已寫入並驗證：${data.path}`);
+    addMessage("ai", `工作 Agent 已寫入並驗證：${data.path}${writeTime ? `\n修改時間：${writeTime}` : ""}`);
   } catch (error) {
     button.disabled = false;
     button.textContent = "確認寫入";

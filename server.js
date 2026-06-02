@@ -169,6 +169,10 @@ function countChangedLines(diff) {
     .filter((line) => /^[+-]/.test(line) && !/^---|\+\+\+/.test(line)).length;
 }
 
+function sha256(text) {
+  return crypto.createHash("sha256").update(String(text || ""), "utf8").digest("hex");
+}
+
 function cleanupPendingWrites() {
   const now = Date.now();
   for (const [token, item] of pendingWrites.entries()) {
@@ -1210,6 +1214,8 @@ app.post("/api/execute", async (req, res) => {
         content,
         diff,
         reason: String(item.reason || ""),
+        baseHash: sha256(original.content),
+        targetHash: sha256(content),
         createdAt: Date.now()
       });
 
@@ -1255,11 +1261,25 @@ app.post("/api/confirm-write", async (req, res) => {
     }
 
     const safe = normalizeProjectRelativePath(pending.path);
+    const beforeContent = await fsp.readFile(safe.absolute, "utf8");
+    const beforeHash = sha256(beforeContent);
+    if (beforeHash !== pending.baseHash) {
+      pendingWrites.delete(token);
+      return res.status(409).json({
+        error: `檔案 ${safe.relative} 在產生 diff 後已變更，為避免覆蓋新內容，請重新產生計畫與 diff。`
+      });
+    }
+
     await fsp.writeFile(safe.absolute, pending.content, "utf8");
+    const now = new Date();
+    await fsp.utimes(safe.absolute, now, now);
+
     const writtenContent = await fsp.readFile(safe.absolute, "utf8");
-    if (writtenContent !== pending.content) {
+    const writtenHash = sha256(writtenContent);
+    if (writtenHash !== pending.targetHash) {
       throw new Error(`寫入 ${safe.relative} 後驗證失敗，檔案內容未符合預期。`);
     }
+    const stat = await fsp.stat(safe.absolute);
     pendingWrites.delete(token);
 
     res.json({
@@ -1267,6 +1287,9 @@ app.post("/api/confirm-write", async (req, res) => {
       path: safe.relative,
       message: `已寫入 ${safe.relative}。`,
       verified: true,
+      beforeHash,
+      writtenHash,
+      lastWriteTime: stat.mtime.toISOString(),
       bytes: Buffer.byteLength(writtenContent, "utf8"),
       diff: pending.diff
     });
