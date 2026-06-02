@@ -1,0 +1,15 @@
+{
+  "name": "蝦蝦 Qwen AI 助理",
+  "short_name": "Qwen助理",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#ffffff",
+  "theme_color": "#111827",
+  "icons": [
+    {
+      "src": "icon.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    }
+  ]
+}

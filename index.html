@@ -1,0 +1,157 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>蝦蝦 Qwen AI 助理</title>
+  <link rel="manifest" href="manifest.json" />
+  <meta name="theme-color" content="#111827" />
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <div class="app">
+    <header class="app-header">
+      <div class="title-block">
+        <h1>蝦蝦 Qwen AI 助理</h1>
+        <p>Qwen 整理回答 ・ Tavily 聯網查資料</p>
+      </div>
+      <div class="header-actions">
+        <button id="usageBtn" class="icon-btn" title="用量 / 花費">用量</button>
+        <button id="settingsBtn" class="icon-btn" title="設定">設定</button>
+      </div>
+    </header>
+
+    <div class="toolbar">
+      <label class="switch">
+        <input type="checkbox" id="searchToggle" />
+        <span class="slider"></span>
+        <span class="switch-label">聯網搜尋</span>
+      </label>
+    </div>
+
+    <section class="quick-buttons">
+      <button onclick="useTemplate('sop')">SOP整理</button>
+      <button onclick="useTemplate('travel')">旅遊企劃</button>
+      <button onclick="useTemplate('copywriting')">正式文案</button>
+      <button onclick="useTemplate('email')">信件摘要</button>
+      <button onclick="useTemplate('ro')">RO腳本檢查</button>
+      <button onclick="useTemplate('imagePrompt')">圖片提示詞</button>
+    </section>
+
+    <main id="chatBox" class="chat-box">
+      <div class="message ai">
+        你好，我是你的 Qwen AI 助理。請輸入你想整理的內容。需要查最新資料時，打開上方「聯網搜尋」。
+      </div>
+    </main>
+
+    <footer class="composer">
+      <textarea id="userInput" placeholder="輸入問題或貼上資料..."></textarea>
+      <button id="sendBtn" onclick="sendMessage()">送出</button>
+    </footer>
+  </div>
+
+  <!-- 設定（雙 Key）模態視窗 -->
+  <div id="settingsModal" class="modal-overlay hidden">
+    <div class="modal">
+      <div class="modal-header">
+        <h2>設定</h2>
+        <button class="close-btn" onclick="closeModal('settingsModal')">×</button>
+      </div>
+      <div class="modal-body">
+        <label class="field">
+          <span>Qwen API Key</span>
+          <input type="password" id="qwenKey" placeholder="sk-..." autocomplete="off" />
+        </label>
+        <label class="field">
+          <span>Tavily API Key（聯網搜尋用，可留空）</span>
+          <input type="password" id="tavilyKey" placeholder="tvly-..." autocomplete="off" />
+        </label>
+        <label class="field">
+          <span>Qwen Base URL</span>
+          <input type="text" id="baseUrl" placeholder="https://dashscope-intl.aliyuncs.com/compatible-mode/v1" />
+        </label>
+        <label class="field">
+          <span>模型</span>
+          <select id="model">
+            <option value="qwen-flash">qwen-flash（最省）</option>
+            <option value="qwen3.5-flash">qwen3.5-flash</option>
+            <option value="qwen-plus">qwen-plus</option>
+            <option value="qwen3-max">qwen3-max（最強）</option>
+          </select>
+        </label>
+
+        <div class="field-group">
+          <h3>花費估算單價（僅估算，以官方帳單為準）</h3>
+          <div class="grid-2">
+            <label class="field">
+              <span>Qwen 輸入價 / 1M tokens</span>
+              <input type="number" id="priceIn" step="0.001" min="0" placeholder="0" />
+            </label>
+            <label class="field">
+              <span>Qwen 輸出價 / 1M tokens</span>
+              <input type="number" id="priceOut" step="0.001" min="0" placeholder="0" />
+            </label>
+            <label class="field">
+              <span>Tavily 單次搜尋價</span>
+              <input type="number" id="priceSearch" step="0.001" min="0" placeholder="0" />
+            </label>
+            <label class="field">
+              <span>幣別標示</span>
+              <input type="text" id="currency" placeholder="USD" />
+            </label>
+          </div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn-secondary" onclick="clearKeys()">清除 Key</button>
+        <button class="btn-primary" onclick="saveSettings()">儲存</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 用量 / 花費模態視窗 -->
+  <div id="usageModal" class="modal-overlay hidden">
+    <div class="modal">
+      <div class="modal-header">
+        <h2>用量 / 預估花費</h2>
+        <button class="close-btn" onclick="closeModal('usageModal')">×</button>
+      </div>
+      <div class="modal-body">
+        <div class="usage-card">
+          <h3>Qwen</h3>
+          <table class="usage-table">
+            <thead>
+              <tr><th></th><th>本次階段</th><th>累計總量</th></tr>
+            </thead>
+            <tbody>
+              <tr><td>輸入 tokens</td><td id="sIn">0</td><td id="tIn">0</td></tr>
+              <tr><td>輸出 tokens</td><td id="sOut">0</td><td id="tOut">0</td></tr>
+              <tr><td>總 tokens</td><td id="sTotal">0</td><td id="tTotal">0</td></tr>
+              <tr><td>預估花費</td><td id="sCost">0</td><td id="tCost">0</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <div class="usage-card">
+          <h3>Tavily</h3>
+          <table class="usage-table">
+            <thead>
+              <tr><th></th><th>本次階段</th><th>累計總量</th></tr>
+            </thead>
+            <tbody>
+              <tr><td>搜尋次數</td><td id="sSearch">0</td><td id="tSearch">0</td></tr>
+              <tr><td>預估花費</td><td id="sSearchCost">0</td><td id="tSearchCost">0</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <p class="hint">說明：Qwen / Tavily 無公開查詢真實餘額的 API，此為本機統計與估算，實際以官方帳單為準。</p>
+      </div>
+      <div class="modal-footer">
+        <button class="btn-secondary" onclick="resetUsage()">重設統計</button>
+        <button class="btn-primary" onclick="closeModal('usageModal')">關閉</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="script.js"></script>
+</body>
+</html>
