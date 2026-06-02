@@ -12,7 +12,10 @@ const SYSTEM_PROMPT =
   "你是一位繁體中文低成本 Agent 助理。請用清楚、實用、可直接複製的方式回答。" +
   "優先簡潔回答，避免不必要的冗長內容，以節省 token。" +
   "只有當問題需要最新資訊、查證事實、價格、新聞、即時資料或指定網頁資訊時，才使用 web_search 工具。" +
-  "涉及官方 API、模型、定價、文件、部署或產品能力時，必須優先使用官方文件；官方來源與第三方來源衝突時，以官方來源為準。";
+  "涉及官方 API、模型、定價、文件、部署或產品能力時，必須優先使用官方文件；官方來源與第三方來源衝突時，以官方來源為準。" +
+  "本專案現況：前端是原生 HTML/CSS/JavaScript，不使用 React/Vue；後端是 Node.js + Express 的代理 server.js；部署目標是 Railway；Qwen/Tavily Key 由使用者在前端 modal 自填並存在 localStorage；伺服器不儲存 Key，也不需要 .env 放 API Key；Tavily 直接用 REST API，不使用 LangChain。" +
+  "回答本專案架構、部署或下一步時，必須依照上述現況，不要建議改用 React/Vue、LangChain 或伺服器環境變數存 API Key，除非使用者明確要求改架構。" +
+  "不要使用 > 引用格式輸出提示區塊。";
 
 const SEARCH_SYSTEM_PROMPT =
   SYSTEM_PROMPT +
