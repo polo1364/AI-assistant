@@ -43,11 +43,20 @@ npm start
 - 花費為「估算」：在設定填入每 1M tokens 的輸入/輸出單價與 Tavily 單次搜尋價即可估算。
 - Qwen / Tavily 都沒有公開查詢真實餘額的 API，實際金額以官方帳單為準。
 
-## 部署（需支援 Node 的平台）
-因為有 Node 代理，建議部署到 Render Web Service / Railway 等：
-- Build Command：`npm install`
-- Start Command：`npm start`
+## 部署到 Railway（建議）
+因為有 Node 代理，需要部署到能跑 Node 的平台。GitHub Pages 是純靜態主機，無法執行 `server.js`，請勿用 Pages。
+
+步驟：
+1. 進 [railway.app](https://railway.app)，用 GitHub 登入。
+2. New Project → Deploy from GitHub repo → 選你的 repo。
+3. Railway 會自動偵測 `package.json` 並依 `railway.json` / `Procfile`：安裝 `npm install`、啟動 `npm start`。
+4. Build 完成後到該服務 Settings → Networking → Generate Domain，取得對外網址（`*.up.railway.app`）。
+5. 手機/電腦打開該網址，在「設定」填入 Key 即可使用。
+
+注意：
 - 不需設定任何 API Key 環境變數（Key 由使用者在前端 modal 自填）。
+- `PORT` 由 Railway 自動注入，程式已用 `process.env.PORT` 相容。
+- 若 repo 把專案放在子資料夾，請在 Railway 服務 Settings 的 Root Directory 指定該資料夾。
 
 ## 安全提醒
 - Key 只存在你裝置的瀏覽器，公用裝置使用後請到設定按「清除 Key」。
