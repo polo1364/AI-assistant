@@ -1256,12 +1256,18 @@ app.post("/api/confirm-write", async (req, res) => {
 
     const safe = normalizeProjectRelativePath(pending.path);
     await fsp.writeFile(safe.absolute, pending.content, "utf8");
+    const writtenContent = await fsp.readFile(safe.absolute, "utf8");
+    if (writtenContent !== pending.content) {
+      throw new Error(`寫入 ${safe.relative} 後驗證失敗，檔案內容未符合預期。`);
+    }
     pendingWrites.delete(token);
 
     res.json({
       ok: true,
       path: safe.relative,
       message: `已寫入 ${safe.relative}。`,
+      verified: true,
+      bytes: Buffer.byteLength(writtenContent, "utf8"),
       diff: pending.diff
     });
   } catch (error) {

@@ -463,6 +463,10 @@ async function confirmWorkWrite(token, button) {
   if (!token) return;
   if (!confirm("確認要寫入這個 diff 嗎？此動作會修改專案檔案。")) return;
 
+  const status = document.createElement("div");
+  status.className = "work-write-status";
+  status.textContent = "正在寫入並驗證檔案...";
+  button.insertAdjacentElement("afterend", status);
   button.disabled = true;
   button.textContent = "寫入中";
   try {
@@ -475,10 +479,16 @@ async function confirmWorkWrite(token, button) {
     if (!response.ok) throw new Error(data.error || "寫入失敗");
     button.textContent = "已寫入";
     button.classList.add("written");
-    addMessage("ai", `工作 Agent 已寫入：${data.path}`);
+    status.classList.add("success");
+    status.textContent = data.verified
+      ? `已寫入並驗證成功：${data.path}`
+      : `已寫入：${data.path}`;
+    addMessage("ai", `工作 Agent 已寫入並驗證：${data.path}`);
   } catch (error) {
     button.disabled = false;
     button.textContent = "確認寫入";
+    status.classList.add("error");
+    status.textContent = error.message || "寫入失敗。";
     alert(error.message || "寫入失敗。");
   }
 }
