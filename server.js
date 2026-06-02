@@ -292,6 +292,37 @@ function validateAnswer(reply) {
   return [...new Set(violations)];
 }
 
+function buildConfidence({ sources, violations, searchCount }) {
+  const officialCount = (sources || []).filter((s) => s.official).length;
+  const sourceCount = (sources || []).length;
+  if (violations.length > 0) {
+    return {
+      level: "low",
+      label: "低",
+      reason: `程式驗證仍發現 ${violations.length} 個風險，建議人工確認。`
+    };
+  }
+  if (officialCount > 0) {
+    return {
+      level: "high",
+      label: "高",
+      reason: `使用 ${officialCount} 個官方來源，且未發現專案事實衝突。`
+    };
+  }
+  if (sourceCount > 0) {
+    return {
+      level: "medium",
+      label: "中",
+      reason: `使用 ${sourceCount} 個來源，但官方來源不足，需視內容人工確認。`
+    };
+  }
+  return {
+    level: searchCount > 0 ? "medium" : "medium",
+    label: "中",
+    reason: searchCount > 0 ? "已執行搜尋但來源不足。" : "未使用外部來源，主要依據模型知識與專案事實。"
+  };
+}
+
 async function callQwen({ baseUrl, qwenKey, model, messages, tools, toolChoice }) {
   const body = {
     model,
@@ -318,6 +349,132 @@ async function callQwen({ baseUrl, qwenKey, model, messages, tools, toolChoice }
     throw err;
   }
   return data;
+}
+
+function safeJsonParse(text) {
+  try {
+    const cleaned = String(text || "")
+      .replace(/^```json\s*/i, "")
+      .replace(/```$/i, "")
+      .trim();
+    return JSON.parse(cleaned);
+  } catch (e) {
+    return null;
+  }
+}
+
+function fallbackPlan(userMessages, searchMode) {
+  const latest = userMessages[userMessages.length - 1]?.content || "";
+  const route = classifySearch(latest);
+  const needsSearch =
+    searchMode === "force" ||
+    (searchMode === "auto" && (
+      route.officialPreferred ||
+      /最新|目前|現在|官方|價格|限制|部署|支援|是否|查詢|比較|研究/i.test(latest)
+    ));
+  const queries = route.profiles.length
+    ? route.profiles.map((p) => {
+        if (p === "qwen") return `Qwen OpenAI-compatible API official documentation ${latest}`;
+        if (p === "tavily") return `Tavily API search official documentation ${latest}`;
+        if (p === "railway") return `Railway Node.js Express deploy official documentation ${latest}`;
+        return latest;
+      })
+    : [latest];
+
+  return {
+    taskType: route.profiles[0] || "general",
+    needsSearch,
+    queries: queries.slice(0, 3),
+    answerFormat: /架構|部署|api|比較|風險|建議/i.test(latest) ? "conclusion_basis_risks_next_steps" : "natural",
+    mustUseProjectFacts: /本專案|這個|目前|部署|架構|key|api|railway|tavily|qwen/i.test(latest)
+  };
+}
+
+async function createAgentPlan({ userMessages, qwenKey, model, baseUrl, searchMode }) {
+  const fallback = fallbackPlan(userMessages, searchMode);
+  if (searchMode === "off") return fallback;
+
+  const latest = userMessages[userMessages.length - 1]?.content || "";
+  const plannerPrompt =
+    "請只輸出 JSON，不要 Markdown。你是低成本 agent 的 Planner。\n" +
+    "根據使用者問題決定 taskType、是否需要搜尋、最多 3 個搜尋 query、回答格式，以及是否必須使用本專案事實。\n" +
+    "taskType 只能是 project、official_qwen、official_tavily、official_railway、general_write、coding、research、unknown。\n" +
+    "若問題涉及官方 API、部署、價格、限制、最新資訊或第三方服務狀態，needsSearch 應為 true。\n" +
+    "本專案事實：\n" + projectFactsText() + "\n\n" +
+    "輸出格式：{\"taskType\":\"...\",\"needsSearch\":true,\"queries\":[\"...\"],\"answerFormat\":\"conclusion_basis_risks_next_steps|natural\",\"mustUseProjectFacts\":true}\n\n" +
+    `使用者問題：${latest}`;
+
+  try {
+    const planned = await callQwen({
+      baseUrl,
+      qwenKey,
+      model,
+      messages: [
+        { role: "system", content: SYSTEM_PROMPT },
+        { role: "user", content: plannerPrompt }
+      ]
+    });
+    const json = safeJsonParse(planned.choices?.[0]?.message?.content);
+    if (!json) return { ...fallback, usage: planned.usage || null };
+    return {
+      taskType: json.taskType || fallback.taskType,
+      needsSearch: Boolean(json.needsSearch),
+      queries: Array.isArray(json.queries) && json.queries.length > 0 ? json.queries.slice(0, 3) : fallback.queries,
+      answerFormat: json.answerFormat || fallback.answerFormat,
+      mustUseProjectFacts: Boolean(json.mustUseProjectFacts),
+      usage: planned.usage || null
+    };
+  } catch (e) {
+    return fallback;
+  }
+}
+
+async function executePlannedSearch({ plan, userMessages, qwenKey, tavilyKey, model, baseUrl, aggregateUsage, steps }) {
+  const contexts = [];
+  const allSources = [];
+  let searchCount = 0;
+
+  for (const query of plan.queries.slice(0, 3)) {
+    steps.push(`Tavily 搜尋：${query}`);
+    const data = await tavilySearch(query, tavilyKey);
+    const built = buildSearchContext(data);
+    contexts.push(`查詢：${query}\n${built.context}`);
+    allSources.push(...built.sources);
+    searchCount += 1;
+    steps.push(`取得 ${built.sources.length} 個來源，優先保留官方來源`);
+  }
+
+  const latest = userMessages[userMessages.length - 1]?.content || "";
+  const finalPrompt =
+    "請根據以下搜尋證據與本專案事實回答。不要在正文列出來源網址，系統會在下方顯示來源。\n" +
+    "若資料不足，請明確說明不足處。若回答架構/API/部署/決策題，使用「結論、依據、風險、建議下一步」格式。\n\n" +
+    `Planner：${JSON.stringify({
+      taskType: plan.taskType,
+      answerFormat: plan.answerFormat,
+      mustUseProjectFacts: plan.mustUseProjectFacts
+    })}\n\n` +
+    `本專案事實：\n${projectFactsText()}\n\n` +
+    `搜尋證據：\n${contexts.join("\n---\n")}\n\n` +
+    `使用者問題：${latest}`;
+
+  const final = await callQwen({
+    baseUrl,
+    qwenKey,
+    model,
+    messages: [
+      { role: "system", content: SEARCH_SYSTEM_PROMPT },
+      ...userMessages.slice(0, -1),
+      { role: "user", content: finalPrompt }
+    ]
+  });
+  mergeUsage(aggregateUsage, final.usage);
+  steps.push("Writer：Qwen 根據計畫與搜尋證據產生回答");
+
+  return {
+    reply: stripInlineSources(final.choices?.[0]?.message?.content || "Qwen 沒有回傳內容。"),
+    sources: dedupeSources(allSources),
+    searchCount
+  };
 }
 
 function shouldSelfCheck({ searchMode, sources, userMessages }) {
@@ -445,6 +602,35 @@ async function runAgentSearch({ userMessages, qwenKey, tavilyKey, model, baseUrl
     const result = await runForceSearch({ userMessages, qwenKey, tavilyKey, model, baseUrl });
     mergeUsage(aggregateUsage, result.usage);
     return { ...result, usage: aggregateUsage };
+  }
+
+  if (searchMode === "auto") {
+    const plan = await createAgentPlan({ userMessages, qwenKey, model, baseUrl, searchMode });
+    mergeUsage(aggregateUsage, plan.usage);
+    steps.push(`Planner JSON：taskType=${plan.taskType}, needsSearch=${plan.needsSearch ? "yes" : "no"}`);
+    if (Array.isArray(plan.queries) && plan.queries.length > 0) {
+      steps.push(`Planner queries：${plan.queries.join(" | ")}`);
+    }
+
+    if (plan.needsSearch) {
+      const planned = await executePlannedSearch({
+        plan,
+        userMessages,
+        qwenKey,
+        tavilyKey,
+        model,
+        baseUrl,
+        aggregateUsage,
+        steps
+      });
+      return {
+        reply: planned.reply,
+        sources: planned.sources,
+        usage: aggregateUsage,
+        searchCount: planned.searchCount,
+        steps
+      };
+    }
   }
 
   const messages = [{ role: "system", content: SYSTEM_PROMPT }, ...userMessages];
@@ -614,13 +800,27 @@ app.post("/api/ask", async (req, res) => {
       mergeUsage(result.usage, repaired.usage);
     }
 
+    const finalViolations = validateAnswer(result.reply);
+    const confidence = buildConfidence({
+      sources: result.sources,
+      violations: finalViolations,
+      searchCount: result.searchCount || 0
+    });
+    result.steps = [
+      ...(result.steps || []),
+      finalViolations.length > 0
+        ? `Validator：仍有 ${finalViolations.length} 個風險，可信度 ${confidence.label}`
+        : `Validator：未發現硬性違規，可信度 ${confidence.label}`
+    ];
+
     res.json({
       reply: result.reply,
       sources: result.sources,
       usage: result.usage,
       searchCount: result.searchCount || 0,
       searchMode: usedSearchMode,
-      steps: result.steps || []
+      steps: result.steps || [],
+      confidence
     });
   } catch (error) {
     console.error("Server error:", error);
