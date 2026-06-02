@@ -289,8 +289,20 @@ function projectFactsText() {
   ].join("\n");
 }
 
+const AGENT_OPERATING_PRINCIPLES = [
+  "運作方式：先判斷問題類型與風險，再決定是否需要查證、規劃或拒答。",
+  "回答原則：有官方來源、使用者提供內容或本專案固定事實支撐時才下肯定結論；沒有足夠證據時要明確說明不足。",
+  "查證原則：涉及價格、計費、API、政策、部署、安全、法律、醫療、投資或最新資訊時，必須優先官方來源；官方與第三方衝突時以官方為準。",
+  "來源原則：若已有官方來源能支撐主要結論，不要因混入第三方來源就整題拒答；應標示以官方來源為準，第三方只作補充。",
+  "保守原則：高風險問題沒有官方來源或明確證據時，不硬答、不猜測，改為說明需要官方資料或開啟查證模式。",
+  "工作 Agent 原則：低風險可讀取與整理；中風險如建立或修改檔案必須先顯示計畫與 diff，等待使用者確認；高風險如刪除、部署、寄信、付款、任意指令第一版禁止或需二次確認。",
+  "安全原則：不讀取 .env、密碼、cookie、憑證、API Key 或專案外路徑；不自動刪檔、不自動部署、不自動寄信、不自動執行任意命令。",
+  "輸出原則：先給結論，再給依據、風險與下一步；若是修改建議，必須偏向最小改動與可確認差異。"
+].join("\n");
+
 const SYSTEM_PROMPT =
   "你是一位繁體中文低成本 Agent 助理。請用清楚、實用、可直接複製的方式回答。" +
+  `核心運作準則（必須遵守）：\n${AGENT_OPERATING_PRINCIPLES}\n` +
   "優先簡潔回答，避免不必要的冗長內容，以節省 token。" +
   "只有當問題需要最新資訊、查證事實、價格、新聞、即時資料或指定網頁資訊時，才使用 web_search 工具。" +
   "涉及官方 API、模型、定價、文件、部署或產品能力時，必須優先使用官方文件；官方來源與第三方來源衝突時，以官方來源為準。" +
@@ -355,6 +367,11 @@ const OFFICIAL_DOMAINS = {
   railway: [
     "railway.app",
     "docs.railway.com"
+  ],
+  openai: [
+    "openai.com",
+    "platform.openai.com",
+    "help.openai.com"
   ]
 };
 
@@ -369,6 +386,9 @@ function classifySearch(query) {
   }
   if (/railway|deploy|部署|node\.js|nodejs|hosting|host/.test(q)) {
     profiles.push("railway");
+  }
+  if (/openai|chatgpt|gpt-|gpt4|gpt-4|gpt5|gpt-5|api pricing|pricing|計費|費用|價格/.test(q)) {
+    profiles.push("openai");
   }
 
   const domains = [...new Set(profiles.flatMap((p) => OFFICIAL_DOMAINS[p] || []))];
@@ -747,6 +767,7 @@ function fallbackPlan(userMessages, searchMode) {
         if (p === "qwen") return `Qwen OpenAI-compatible API official documentation ${latest}`;
         if (p === "tavily") return `Tavily API search official documentation ${latest}`;
         if (p === "railway") return `Railway Node.js Express deploy official documentation ${latest}`;
+        if (p === "openai") return `OpenAI API pricing official documentation ${latest}`;
         return latest;
       })
     : [latest];
@@ -768,7 +789,7 @@ async function createAgentPlan({ userMessages, qwenKey, model, baseUrl, searchMo
   const plannerPrompt =
     "請只輸出 JSON，不要 Markdown。你是低成本 agent 的 Planner。\n" +
     "根據使用者問題決定 taskType、是否需要搜尋、最多 3 個搜尋 query、回答格式，以及是否必須使用本專案事實。\n" +
-    "taskType 只能是 project、official_qwen、official_tavily、official_railway、general_write、coding、research、unknown。\n" +
+    "taskType 只能是 project、official_qwen、official_tavily、official_railway、official_openai、general_write、coding、research、unknown。\n" +
     "若問題涉及官方 API、部署、價格、限制、最新資訊或第三方服務狀態，needsSearch 應為 true。\n" +
     "本專案事實：\n" + projectFactsText() + "\n\n" +
     "輸出格式：{\"taskType\":\"...\",\"needsSearch\":true,\"queries\":[\"...\"],\"answerFormat\":\"conclusion_basis_risks_next_steps|natural\",\"mustUseProjectFacts\":true}\n\n" +
