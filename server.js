@@ -145,6 +145,30 @@ function createUnifiedDiff(filePath, oldText, newText) {
   return lines.join("\n");
 }
 
+function applyReplacements(original, replacements) {
+  let content = String(original || "");
+  for (const replacement of replacements || []) {
+    const oldText = String(replacement.oldText || "");
+    const newText = String(replacement.newText || "");
+    if (!oldText || oldText === newText) continue;
+    const first = content.indexOf(oldText);
+    if (first === -1) {
+      throw new Error("AI 提供的 oldText 無法在檔案中找到，已取消建立此 patch。");
+    }
+    if (content.indexOf(oldText, first + oldText.length) !== -1) {
+      throw new Error("AI 提供的 oldText 在檔案中出現多次，為避免誤改已取消建立此 patch。");
+    }
+    content = content.slice(0, first) + newText + content.slice(first + oldText.length);
+  }
+  return content;
+}
+
+function countChangedLines(diff) {
+  return String(diff || "")
+    .split("\n")
+    .filter((line) => /^[+-]/.test(line) && !/^---|\+\+\+/.test(line)).length;
+}
+
 function cleanupPendingWrites() {
   const now = Date.now();
   for (const [token, item] of pendingWrites.entries()) {
@@ -211,8 +235,10 @@ async function proposeProjectPatches({ goal, files, qwenKey, model, baseUrl }) {
   const prompt =
     "你是半自動工作 Agent。請根據使用者目標與專案檔案，提出必要修改。\n" +
     "只能修改提供的檔案；不要新增未提供檔案；不要輸出 Markdown；只輸出 JSON。\n" +
-    "若不需要修改，patches 請回空陣列。\n" +
-    "JSON 格式：{\"summary\":\"...\",\"patches\":[{\"path\":\"index.html\",\"content\":\"完整新檔案內容\",\"reason\":\"修改原因\"}],\"notes\":[\"...\"]}\n\n" +
+    "務必採用局部最小修改，不要回傳完整新檔案內容。\n" +
+    "每個 replacement 的 oldText 必須是檔案中唯一出現的完整原文片段，newText 是替換後片段。\n" +
+    "若只需要建議、不需要修改，patches 請回空陣列並把建議放 notes。\n" +
+    "JSON 格式：{\"summary\":\"...\",\"patches\":[{\"path\":\"README.md\",\"reason\":\"修改原因\",\"replacements\":[{\"oldText\":\"原文片段\",\"newText\":\"新文片段\"}]}],\"notes\":[\"...\"]}\n\n" +
     `使用者目標：${goal}\n\n` +
     `專案檔案：\n${fileBundleForPrompt(files)}`;
 
@@ -1167,11 +1193,16 @@ app.post("/api/execute", async (req, res) => {
     for (const item of proposal.patches.slice(0, 4)) {
       const safe = normalizeProjectRelativePath(item.path);
       const original = readFiles.find((file) => file.path === safe.relative) || await readProjectFile(safe.relative);
-      const content = String(item.content || "");
+      if (!Array.isArray(item.replacements) || item.replacements.length === 0) continue;
+      const content = applyReplacements(original.content, item.replacements);
       if (!content || content === original.content) continue;
 
       const diff = createUnifiedDiff(safe.relative, original.content, content);
       if (!diff) continue;
+      if (countChangedLines(diff) > 80) {
+        proposal.notes.push(`${safe.relative} 的建議修改過大，已略過；請要求 Agent 拆成更小的局部修改。`);
+        continue;
+      }
 
       const token = crypto.randomBytes(18).toString("hex");
       pendingWrites.set(token, {

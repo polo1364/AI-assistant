@@ -388,7 +388,7 @@ function renderWorkResult(data) {
     <p>${escapeHtml(data.summary || "已完成執行。")}</p>
     ${readFiles ? `<h4>已讀取檔案</h4><ul>${readFiles}</ul>` : ""}
     ${notes ? `<h4>備註</h4><ul>${notes}</ul>` : ""}
-    ${patches ? `<h4>待確認 diff</h4>${patches}` : "<p>沒有產生需要寫入的 diff。</p>"}
+    ${patches ? `<h4>待確認 diff</h4><p class="hint">請確認差異內容正確後再按「確認寫入」。不按就不會修改檔案。</p>${patches}` : "<p>沒有產生需要寫入的 diff。</p>"}
   `;
   box.classList.remove("hidden");
 
