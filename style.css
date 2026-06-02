@@ -371,6 +371,31 @@ body {
   margin: 12px 0;
 }
 
+.agent-trace {
+  margin-top: 12px;
+  padding: 10px 12px;
+  border: 1px solid #dbeafe;
+  border-radius: 12px;
+  background: #eff6ff;
+  color: #1e3a8a;
+  font-size: 13px;
+  white-space: normal;
+}
+
+.agent-trace-title {
+  font-weight: 700;
+  margin-bottom: 6px;
+}
+
+.agent-trace ol {
+  margin: 0;
+  padding-left: 18px;
+}
+
+.agent-trace li {
+  margin: 3px 0;
+}
+
 /* 讀取動畫 */
 .message.typing {
   display: inline-flex;

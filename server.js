@@ -212,6 +212,10 @@ async function callQwen({ baseUrl, qwenKey, model, messages, tools, toolChoice }
 }
 
 async function runForceSearch({ userMessages, qwenKey, tavilyKey, model, baseUrl }) {
+  const steps = [
+    "強制搜尋模式：先使用 Tavily 查資料",
+    "將搜尋結果交給 Qwen 整理回答"
+  ];
   const latestUser = [...userMessages].reverse().find((m) => m.role === "user")?.content || "";
   const tavilyData = await tavilySearch(latestUser, tavilyKey);
   const built = buildSearchContext(tavilyData);
@@ -230,13 +234,15 @@ async function runForceSearch({ userMessages, qwenKey, tavilyKey, model, baseUrl
       reply: stripInlineSources(qwenData.choices?.[0]?.message?.content || "Qwen 沒有回傳內容。"),
     sources: built.sources,
     usage: qwenData.usage || null,
-    searchCount: 1
+    searchCount: 1,
+    steps
   };
 }
 
 async function runAgentSearch({ userMessages, qwenKey, tavilyKey, model, baseUrl, searchMode }) {
   const aggregateUsage = { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 };
   const sources = [];
+  const steps = [];
   let searchCount = 0;
 
   if (searchMode === "force") {
@@ -246,6 +252,7 @@ async function runAgentSearch({ userMessages, qwenKey, tavilyKey, model, baseUrl
   }
 
   const messages = [{ role: "system", content: SYSTEM_PROMPT }, ...userMessages];
+  steps.push(searchMode === "auto" ? "自動模式：Qwen 判斷是否需要搜尋" : "關閉搜尋：直接由 Qwen 回答");
   const first = await callQwen({
     baseUrl,
     qwenKey,
@@ -260,14 +267,17 @@ async function runAgentSearch({ userMessages, qwenKey, tavilyKey, model, baseUrl
   let toolCalls = assistantMessage?.tool_calls || [];
 
   if (searchMode !== "auto" || toolCalls.length === 0) {
+    if (searchMode === "auto") steps.push("判斷結果：不需要搜尋，直接回答");
     return {
       reply: stripInlineSources(assistantMessage?.content || "Qwen 沒有回傳內容。"),
       sources: [],
       usage: aggregateUsage,
-      searchCount
+      searchCount,
+      steps
     };
   }
 
+  steps.push(`判斷結果：需要搜尋（${toolCalls.length} 個查詢）`);
   messages.push(assistantMessage);
 
   for (let round = 0; round < 2 && toolCalls.length > 0; round += 1) {
@@ -280,10 +290,12 @@ async function runAgentSearch({ userMessages, qwenKey, tavilyKey, model, baseUrl
         args = {};
       }
       const query = args.query || userMessages[userMessages.length - 1]?.content || "";
+      steps.push(`Tavily 搜尋：${query}`);
       const tavilyData = await tavilySearch(query, tavilyKey);
       const built = buildSearchContext(tavilyData);
       sources.push(...built.sources);
       searchCount += 1;
+      steps.push(`取得 ${built.sources.length} 個來源，優先保留官方來源`);
       messages.push({
         role: "tool",
         tool_call_id: call.id,
@@ -304,21 +316,26 @@ async function runAgentSearch({ userMessages, qwenKey, tavilyKey, model, baseUrl
     toolCalls = assistantMessage?.tool_calls || [];
 
     if (toolCalls.length === 0) {
+      steps.push("Qwen 根據搜尋結果整理最終回答");
       return {
         reply: stripInlineSources(assistantMessage?.content || "Qwen 沒有回傳內容。"),
         sources: dedupeSources(sources),
         usage: aggregateUsage,
-        searchCount
+        searchCount,
+        steps
       };
     }
+    steps.push(`需要補充搜尋（第 ${round + 2} 輪）`);
     messages.push(assistantMessage);
   }
 
+  steps.push("已達工具呼叫上限，輸出目前結果");
   return {
     reply: stripInlineSources(assistantMessage?.content || "已完成搜尋，但 Qwen 沒有回傳最終內容。"),
     sources: dedupeSources(sources),
     usage: aggregateUsage,
-    searchCount
+    searchCount,
+    steps
   };
 }
 
@@ -358,7 +375,8 @@ app.post("/api/ask", async (req, res) => {
       sources: result.sources,
       usage: result.usage,
       searchCount: result.searchCount || 0,
-      searchMode: usedSearchMode
+      searchMode: usedSearchMode,
+      steps: result.steps || []
     });
   } catch (error) {
     console.error("Server error:", error);
