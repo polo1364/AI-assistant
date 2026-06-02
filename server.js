@@ -18,7 +18,7 @@ const SEARCH_SYSTEM_PROMPT =
   SYSTEM_PROMPT +
   "請依據搜尋結果回答；若搜尋結果不足以回答，請誠實說明。請勿杜撰未出現在搜尋結果的事實。" +
   "搜尋結果標示為「官方來源」者可信度最高。若沒有官方來源，請避免對官方能力下絕對結論。" +
-  "回答結尾固定使用一般編號清單列出來源，格式為「來源：\\n1. 標題 — URL」。不要使用 > 引用格式。";
+  "不要在回答正文中列出「來源」段落、網址或引用清單；系統會在回答下方自動顯示來源。不要使用 > 引用格式。";
 
 const WEB_SEARCH_TOOL = {
   type: "function",
@@ -175,6 +175,14 @@ function dedupeSources(sources) {
   });
 }
 
+function stripInlineSources(reply) {
+  if (!reply) return reply;
+  return reply
+    .replace(/\n\s*來源[:：][\s\S]*$/i, "")
+    .replace(/\n\s*參考來源[:：][\s\S]*$/i, "")
+    .trim();
+}
+
 async function callQwen({ baseUrl, qwenKey, model, messages, tools, toolChoice }) {
   const body = {
     model,
@@ -219,7 +227,7 @@ async function runForceSearch({ userMessages, qwenKey, tavilyKey, model, baseUrl
   });
 
   return {
-    reply: qwenData.choices?.[0]?.message?.content || "Qwen 沒有回傳內容。",
+      reply: stripInlineSources(qwenData.choices?.[0]?.message?.content || "Qwen 沒有回傳內容。"),
     sources: built.sources,
     usage: qwenData.usage || null,
     searchCount: 1
@@ -253,7 +261,7 @@ async function runAgentSearch({ userMessages, qwenKey, tavilyKey, model, baseUrl
 
   if (searchMode !== "auto" || toolCalls.length === 0) {
     return {
-      reply: assistantMessage?.content || "Qwen 沒有回傳內容。",
+      reply: stripInlineSources(assistantMessage?.content || "Qwen 沒有回傳內容。"),
       sources: [],
       usage: aggregateUsage,
       searchCount
@@ -297,7 +305,7 @@ async function runAgentSearch({ userMessages, qwenKey, tavilyKey, model, baseUrl
 
     if (toolCalls.length === 0) {
       return {
-        reply: assistantMessage?.content || "Qwen 沒有回傳內容。",
+        reply: stripInlineSources(assistantMessage?.content || "Qwen 沒有回傳內容。"),
         sources: dedupeSources(sources),
         usage: aggregateUsage,
         searchCount
@@ -307,7 +315,7 @@ async function runAgentSearch({ userMessages, qwenKey, tavilyKey, model, baseUrl
   }
 
   return {
-    reply: assistantMessage?.content || "已完成搜尋，但 Qwen 沒有回傳最終內容。",
+    reply: stripInlineSources(assistantMessage?.content || "已完成搜尋，但 Qwen 沒有回傳最終內容。"),
     sources: dedupeSources(sources),
     usage: aggregateUsage,
     searchCount
