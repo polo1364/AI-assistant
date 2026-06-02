@@ -30,8 +30,14 @@ let usage = {
   total: emptyUsage()
 };
 
-const templates = {
-  sop: `請將以下內容整理成正式 SOP。
+const DB_NAME = "qwen_assistant_db";
+const DB_VERSION = 1;
+const TEMPLATES_SEEDED_KEY = "qwen_assistant_templates_seeded";
+
+const DEFAULT_TEMPLATES = [
+  {
+    name: "SOP整理",
+    content: `請將以下內容整理成正式 SOP。
 請使用繁體中文。
 請包含：
 1. 目的
@@ -42,9 +48,11 @@ const templates = {
 6. 異常處理
 
 以下是內容：
-`,
-
-  travel: `請將以下內容整理成旅遊企劃。
+`
+  },
+  {
+    name: "旅遊企劃",
+    content: `請將以下內容整理成旅遊企劃。
 請使用繁體中文。
 請包含：
 1. 行程重點
@@ -56,9 +64,11 @@ const templates = {
 7. 適合族群
 
 以下是資料：
-`,
-
-  copywriting: `請將以下內容改寫成正式文案。
+`
+  },
+  {
+    name: "正式文案",
+    content: `請將以下內容改寫成正式文案。
 請使用繁體中文。
 語氣要自然、清楚、有質感。
 請提供：
@@ -68,9 +78,11 @@ const templates = {
 4. 可直接複製版本
 
 以下是內容：
-`,
-
-  email: `請幫我整理以下信件內容。
+`
+  },
+  {
+    name: "信件摘要",
+    content: `請幫我整理以下信件內容。
 請使用繁體中文。
 請包含：
 1. 信件重點
@@ -80,9 +92,11 @@ const templates = {
 5. 可直接複製的回信版本
 
 以下是信件：
-`,
-
-  ro: `請幫我檢查以下 RO / rAthena 腳本。
+`
+  },
+  {
+    name: "RO腳本檢查",
+    content: `請幫我檢查以下 RO / rAthena 腳本。
 請使用繁體中文。
 請包含：
 1. 可能錯誤
@@ -92,9 +106,11 @@ const templates = {
 5. 注意事項
 
 以下是腳本：
-`,
-
-  imagePrompt: `請幫我把以下需求整理成 AI 圖像生成提示詞。
+`
+  },
+  {
+    name: "圖片提示詞",
+    content: `請幫我把以下需求整理成 AI 圖像生成提示詞。
 請使用繁體中文。
 請包含：
 1. 主題設定
@@ -108,7 +124,81 @@ const templates = {
 
 以下是需求：
 `
-};
+  }
+];
+
+/* ---------- IndexedDB ---------- */
+let dbPromise = null;
+
+function openDB() {
+  if (dbPromise) return dbPromise;
+  dbPromise = new Promise((resolve, reject) => {
+    const req = indexedDB.open(DB_NAME, DB_VERSION);
+    req.onupgradeneeded = (e) => {
+      const db = e.target.result;
+      if (!db.objectStoreNames.contains("history")) {
+        const store = db.createObjectStore("history", { keyPath: "id", autoIncrement: true });
+        store.createIndex("ts", "ts");
+      }
+      if (!db.objectStoreNames.contains("templates")) {
+        db.createObjectStore("templates", { keyPath: "id", autoIncrement: true });
+      }
+    };
+    req.onsuccess = () => resolve(req.result);
+    req.onerror = () => reject(req.error);
+  });
+  return dbPromise;
+}
+
+async function idbAll(storeName) {
+  const db = await openDB();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(storeName, "readonly");
+    const req = tx.objectStore(storeName).getAll();
+    req.onsuccess = () => resolve(req.result || []);
+    req.onerror = () => reject(req.error);
+  });
+}
+
+async function idbAdd(storeName, value) {
+  const db = await openDB();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(storeName, "readwrite");
+    const req = tx.objectStore(storeName).add(value);
+    req.onsuccess = () => resolve(req.result);
+    req.onerror = () => reject(req.error);
+  });
+}
+
+async function idbPut(storeName, value) {
+  const db = await openDB();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(storeName, "readwrite");
+    const req = tx.objectStore(storeName).put(value);
+    req.onsuccess = () => resolve(req.result);
+    req.onerror = () => reject(req.error);
+  });
+}
+
+async function idbDelete(storeName, key) {
+  const db = await openDB();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(storeName, "readwrite");
+    const req = tx.objectStore(storeName).delete(key);
+    req.onsuccess = () => resolve();
+    req.onerror = () => reject(req.error);
+  });
+}
+
+async function idbClear(storeName) {
+  const db = await openDB();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(storeName, "readwrite");
+    const req = tx.objectStore(storeName).clear();
+    req.onsuccess = () => resolve();
+    req.onerror = () => reject(req.error);
+  });
+}
 
 /* ---------- 設定存取 ---------- */
 function loadSettings() {
@@ -231,6 +321,11 @@ function renderUsage() {
 function openModal(id) {
   if (id === "settingsModal") fillSettingsForm();
   if (id === "usageModal") renderUsage();
+  if (id === "templatesModal") {
+    resetTemplateForm();
+    renderTemplates();
+  }
+  if (id === "historyModal") renderHistory();
   document.getElementById(id).classList.remove("hidden");
 }
 
@@ -238,10 +333,277 @@ function closeModal(id) {
   document.getElementById(id).classList.add("hidden");
 }
 
-/* ---------- 聊天 ---------- */
-function useTemplate(type) {
-  userInput.value = templates[type] || "";
-  userInput.focus();
+/* ---------- 自訂查詢模板 ---------- */
+async function seedTemplatesIfNeeded() {
+  if (localStorage.getItem(TEMPLATES_SEEDED_KEY)) return;
+  const existing = await idbAll("templates");
+  if (existing.length === 0) {
+    for (const t of DEFAULT_TEMPLATES) {
+      await idbAdd("templates", { name: t.name, content: t.content });
+    }
+  }
+  localStorage.setItem(TEMPLATES_SEEDED_KEY, "1");
+}
+
+async function renderTemplates() {
+  const list = document.getElementById("templateList");
+  const templates = await idbAll("templates");
+  list.innerHTML = "";
+
+  if (templates.length === 0) {
+    list.innerHTML = '<p class="empty">尚無模板，請在下方新增。</p>';
+    return;
+  }
+
+  templates.forEach((t) => {
+    const item = document.createElement("div");
+    item.className = "list-item";
+
+    const info = document.createElement("div");
+    info.className = "list-info";
+    const name = document.createElement("div");
+    name.className = "list-title";
+    name.textContent = t.name;
+    const preview = document.createElement("div");
+    preview.className = "list-preview";
+    preview.textContent = t.content.replace(/\s+/g, " ").trim().slice(0, 50);
+    info.appendChild(name);
+    info.appendChild(preview);
+
+    const actions = document.createElement("div");
+    actions.className = "list-actions";
+
+    const useBtn = document.createElement("button");
+    useBtn.className = "mini-btn primary";
+    useBtn.textContent = "使用";
+    useBtn.onclick = () => {
+      userInput.value = t.content;
+      closeModal("templatesModal");
+      userInput.focus();
+      autoGrowInput();
+    };
+
+    const editBtn = document.createElement("button");
+    editBtn.className = "mini-btn";
+    editBtn.textContent = "編輯";
+    editBtn.onclick = () => fillTemplateForm(t);
+
+    const delBtn = document.createElement("button");
+    delBtn.className = "mini-btn danger";
+    delBtn.textContent = "刪除";
+    delBtn.onclick = async () => {
+      await idbDelete("templates", t.id);
+      renderTemplates();
+    };
+
+    actions.appendChild(useBtn);
+    actions.appendChild(editBtn);
+    actions.appendChild(delBtn);
+
+    item.appendChild(info);
+    item.appendChild(actions);
+    list.appendChild(item);
+  });
+}
+
+function fillTemplateForm(t) {
+  document.getElementById("templateEditId").value = t.id;
+  document.getElementById("templateName").value = t.name;
+  document.getElementById("templateContent").value = t.content;
+  document.getElementById("templateFormTitle").textContent = "編輯模板";
+  document.querySelector("#templatesModal .modal-body").scrollTop = document.querySelector("#templatesModal .modal-body").scrollHeight;
+}
+
+function resetTemplateForm() {
+  document.getElementById("templateEditId").value = "";
+  document.getElementById("templateName").value = "";
+  document.getElementById("templateContent").value = "";
+  document.getElementById("templateFormTitle").textContent = "新增模板";
+}
+
+async function submitTemplate() {
+  const idRaw = document.getElementById("templateEditId").value;
+  const name = document.getElementById("templateName").value.trim();
+  const content = document.getElementById("templateContent").value;
+
+  if (!name || !content.trim()) {
+    alert("請填入模板名稱與內容。");
+    return;
+  }
+
+  if (idRaw) {
+    await idbPut("templates", { id: Number(idRaw), name, content });
+  } else {
+    await idbAdd("templates", { name, content });
+  }
+  resetTemplateForm();
+  renderTemplates();
+}
+
+/* ---------- 歷史查詢紀錄 ---------- */
+async function saveHistory(record) {
+  try {
+    await idbAdd("history", record);
+  } catch (e) {
+    console.error("儲存歷史失敗", e);
+  }
+}
+
+function formatTime(ts) {
+  const d = new Date(ts);
+  const pad = (n) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}/${pad(d.getMonth() + 1)}/${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
+async function renderHistory() {
+  const list = document.getElementById("historyList");
+  const records = await idbAll("history");
+  records.sort((a, b) => b.ts - a.ts);
+  list.innerHTML = "";
+
+  if (records.length === 0) {
+    list.innerHTML = '<p class="empty">尚無歷史紀錄。</p>';
+    return;
+  }
+
+  records.forEach((r) => {
+    const item = document.createElement("div");
+    item.className = "list-item";
+
+    const info = document.createElement("div");
+    info.className = "list-info";
+    const title = document.createElement("div");
+    title.className = "list-title";
+    title.textContent = (r.searched ? "🌐 " : "") + r.question.replace(/\s+/g, " ").trim().slice(0, 40);
+    const meta = document.createElement("div");
+    meta.className = "list-preview";
+    meta.textContent = formatTime(r.ts);
+    info.appendChild(title);
+    info.appendChild(meta);
+
+    const actions = document.createElement("div");
+    actions.className = "list-actions";
+
+    const loadBtn = document.createElement("button");
+    loadBtn.className = "mini-btn primary";
+    loadBtn.textContent = "載入";
+    loadBtn.onclick = () => {
+      addMessage("user", r.question);
+      addMessage("ai", r.reply, r.sources);
+      closeModal("historyModal");
+    };
+
+    const delBtn = document.createElement("button");
+    delBtn.className = "mini-btn danger";
+    delBtn.textContent = "刪除";
+    delBtn.onclick = async () => {
+      await idbDelete("history", r.id);
+      renderHistory();
+    };
+
+    actions.appendChild(loadBtn);
+    actions.appendChild(delBtn);
+
+    item.appendChild(info);
+    item.appendChild(actions);
+    list.appendChild(item);
+  });
+}
+
+async function clearHistory() {
+  if (!confirm("確定清除全部歷史紀錄？此動作無法復原。")) return;
+  await idbClear("history");
+  renderHistory();
+}
+
+function escapeHtml(s) {
+  return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+}
+
+function renderMarkdown(md) {
+  const codeBlocks = [];
+  let text = md.replace(/```(\w*)\n?([\s\S]*?)```/g, (m, lang, code) => {
+    const i = codeBlocks.length;
+    codeBlocks.push(`<pre><code>${escapeHtml(code.replace(/\n$/, ""))}</code></pre>`);
+    return `\u0000CODE${i}\u0000`;
+  });
+
+  text = escapeHtml(text);
+
+  const inlineCodes = [];
+  text = text.replace(/`([^`]+)`/g, (m, c) => {
+    const i = inlineCodes.length;
+    inlineCodes.push(`<code>${c}</code>`);
+    return `\u0000ICODE${i}\u0000`;
+  });
+
+  function inline(s) {
+    s = s.replace(/\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g, '<a href="$2" target="_blank" rel="noopener noreferrer">$1</a>');
+    s = s.replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>");
+    s = s.replace(/(^|[^*])\*([^*\n]+)\*/g, "$1<em>$2</em>");
+    return s;
+  }
+
+  const lines = text.split(/\r?\n/);
+  let html = "";
+  let listType = null;
+  const closeList = () => {
+    if (listType) {
+      html += `</${listType}>`;
+      listType = null;
+    }
+  };
+
+  for (const line of lines) {
+    if (/^\u0000CODE\d+\u0000$/.test(line.trim())) {
+      closeList();
+      html += line.trim();
+      continue;
+    }
+    const h = line.match(/^(#{1,6})\s+(.*)$/);
+    if (h) {
+      closeList();
+      const lvl = h[1].length;
+      html += `<h${lvl}>${inline(h[2])}</h${lvl}>`;
+      continue;
+    }
+    if (/^\s*([-*_])\1\1+\s*$/.test(line)) {
+      closeList();
+      html += "<hr>";
+      continue;
+    }
+    const ol = line.match(/^\s*\d+\.\s+(.*)$/);
+    if (ol) {
+      if (listType !== "ol") {
+        closeList();
+        html += "<ol>";
+        listType = "ol";
+      }
+      html += `<li>${inline(ol[1])}</li>`;
+      continue;
+    }
+    const ul = line.match(/^\s*[-*]\s+(.*)$/);
+    if (ul) {
+      if (listType !== "ul") {
+        closeList();
+        html += "<ul>";
+        listType = "ul";
+      }
+      html += `<li>${inline(ul[1])}</li>`;
+      continue;
+    }
+    if (/^\s*$/.test(line)) {
+      closeList();
+      continue;
+    }
+    closeList();
+    html += `<p>${inline(line)}</p>`;
+  }
+  closeList();
+
+  html = html.replace(/\u0000ICODE(\d+)\u0000/g, (m, i) => inlineCodes[i]);
+  html = html.replace(/\u0000CODE(\d+)\u0000/g, (m, i) => codeBlocks[i]);
+  return html;
 }
 
 function addMessage(role, text, sources) {
@@ -249,7 +611,12 @@ function addMessage(role, text, sources) {
   div.className = `message ${role}`;
 
   const body = document.createElement("div");
-  body.textContent = text;
+  if (role === "ai") {
+    body.className = "md";
+    body.innerHTML = renderMarkdown(text);
+  } else {
+    body.textContent = text;
+  }
   div.appendChild(body);
 
   if (role === "ai") {
@@ -346,6 +713,13 @@ async function sendMessage() {
         totalTokens: data.usage?.total_tokens || 0,
         searched: useSearch
       });
+      saveHistory({
+        ts: Date.now(),
+        question: text,
+        reply: data.reply,
+        sources: data.sources || [],
+        searched: useSearch
+      });
     } else {
       addMessage("ai", "沒有收到 Qwen 回覆，請檢查 API Key 或模型設定。");
     }
@@ -389,8 +763,11 @@ function resetInputHeight() {
 /* ---------- 事件綁定 ---------- */
 document.getElementById("settingsBtn").onclick = () => openModal("settingsModal");
 document.getElementById("usageBtn").onclick = () => openModal("usageModal");
+document.getElementById("templatesBtn").onclick = () => openModal("templatesModal");
+document.getElementById("historyBtn").onclick = () => openModal("historyModal");
 
-[document.getElementById("settingsModal"), document.getElementById("usageModal")].forEach((overlay) => {
+["settingsModal", "usageModal", "templatesModal", "historyModal"].forEach((id) => {
+  const overlay = document.getElementById(id);
   overlay.addEventListener("click", (e) => {
     if (e.target === overlay) overlay.classList.add("hidden");
   });
@@ -412,11 +789,16 @@ userInput.addEventListener("keydown", function (e) {
 });
 
 /* ---------- 初始化 ---------- */
-(function init() {
+(async function init() {
   const s = getSettings();
   searchToggle.checked = !!s.search;
   loadUsage();
   renderUsage();
+  try {
+    await seedTemplatesIfNeeded();
+  } catch (e) {
+    console.error("初始化模板失敗", e);
+  }
   if (!s.qwenKey) {
     openModal("settingsModal");
   }

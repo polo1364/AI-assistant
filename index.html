@@ -27,16 +27,11 @@
         <span class="slider"></span>
         <span class="switch-label">聯網搜尋</span>
       </label>
+      <div class="toolbar-actions">
+        <button id="templatesBtn" class="chip-btn">模板</button>
+        <button id="historyBtn" class="chip-btn">歷史</button>
+      </div>
     </div>
-
-    <section class="quick-buttons">
-      <button onclick="useTemplate('sop')">SOP整理</button>
-      <button onclick="useTemplate('travel')">旅遊企劃</button>
-      <button onclick="useTemplate('copywriting')">正式文案</button>
-      <button onclick="useTemplate('email')">信件摘要</button>
-      <button onclick="useTemplate('ro')">RO腳本檢查</button>
-      <button onclick="useTemplate('imagePrompt')">圖片提示詞</button>
-    </section>
 
     <main id="chatBox" class="chat-box">
       <div class="message ai">
@@ -148,6 +143,52 @@
       <div class="modal-footer">
         <button class="btn-secondary" onclick="resetUsage()">重設統計</button>
         <button class="btn-primary" onclick="closeModal('usageModal')">關閉</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 自訂查詢模板模態視窗 -->
+  <div id="templatesModal" class="modal-overlay hidden">
+    <div class="modal">
+      <div class="modal-header">
+        <h2>自訂查詢模板</h2>
+        <button class="close-btn" onclick="closeModal('templatesModal')">×</button>
+      </div>
+      <div class="modal-body">
+        <div id="templateList" class="list"></div>
+        <div class="field-group">
+          <h3 id="templateFormTitle">新增模板</h3>
+          <input type="hidden" id="templateEditId" value="" />
+          <label class="field">
+            <span>名稱</span>
+            <input type="text" id="templateName" placeholder="例如：會議記錄整理" />
+          </label>
+          <label class="field">
+            <span>提示內容（點「使用」時會填入輸入框）</span>
+            <textarea id="templateContent" class="modal-textarea" placeholder="請將以下內容整理成..."></textarea>
+          </label>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn-secondary" id="templateCancelBtn" onclick="resetTemplateForm()">清空</button>
+        <button class="btn-primary" onclick="submitTemplate()">儲存模板</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 歷史查詢紀錄模態視窗 -->
+  <div id="historyModal" class="modal-overlay hidden">
+    <div class="modal">
+      <div class="modal-header">
+        <h2>歷史查詢紀錄</h2>
+        <button class="close-btn" onclick="closeModal('historyModal')">×</button>
+      </div>
+      <div class="modal-body">
+        <div id="historyList" class="list"></div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn-secondary" onclick="clearHistory()">清除全部</button>
+        <button class="btn-primary" onclick="closeModal('historyModal')">關閉</button>
       </div>
     </div>
   </div>
