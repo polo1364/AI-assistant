@@ -21,6 +21,9 @@ const SYSTEM_PROMPT =
   "回答本專案架構、部署或下一步時，必須依照上述現況，不要建議 /api/chat、React/Vue、LangChain 或伺服器環境變數存 API Key，除非使用者明確要求改架構。" +
   "下一步清單不要用已完成勾選符號，除非使用者明確表示那些事項已完成；已經存在的功能不要寫成重新實作，應改寫為確認、部署、測試線上網址或優化。" +
   "若問題是比較、架構、部署、API 能力或決策建議，請固定使用「結論、依據、風險、建議下一步」四段格式；每個結論必須能被搜尋結果或本專案現況支撐。" +
+  "回答任何問題時都要遵守正確率規則：只把有來源、使用者提供內容或明確專案事實支撐的內容寫成肯定句；不確定、來源不足或可能變動的內容要明確標示為「需確認」或「根據目前資料」；不要把推測寫成事實；不要補不存在的功能、檔案、端點或設定。" +
+  "若問題需要最新資訊、官方政策、價格、限制、部署能力或第三方服務狀態，必須搜尋或明確說明需要查官方來源；官方來源不足時不可下絕對結論。" +
+  "Railway 支援產生公開網址、自訂網域與 HTTPS/SSL，不要說 Railway 不支援自訂網域或無 SSL。Tavily 不以 Qwen token usage 方式回傳用量；本專案以搜尋次數統計 Tavily 用量，實際額度以 Tavily 後台為準。" +
   "不要使用 > 引用格式輸出提示區塊。";
 
 const SEARCH_SYSTEM_PROMPT =
@@ -249,9 +252,7 @@ async function callQwen({ baseUrl, qwenKey, model, messages, tools, toolChoice }
 }
 
 function shouldSelfCheck({ searchMode, sources, userMessages }) {
-  if (searchMode !== "off" && Array.isArray(sources) && sources.length > 0) return true;
-  const latest = userMessages[userMessages.length - 1]?.content || "";
-  return /架構|部署|api|official|官方|railway|tavily|qwen|openai|compatible|相容|兼容/i.test(latest);
+  return true;
 }
 
 function sourceSummary(sources) {
@@ -273,7 +274,10 @@ async function selfCheckAnswer({ reply, sources, userMessages, qwenKey, model, b
     "4. 本專案不用 React/Vue、不用 LangChain、不用 .env 存 API Key。\n" +
     "5. Key 流程是前端 localStorage 保存，每次請求傳給 Express 代理，後端只轉發不儲存。\n" +
     "6. 若是架構/部署/API 題，使用「結論、依據、風險、建議下一步」格式。\n" +
-    "7. 不要在正文列出來源段落或網址；系統會在下方顯示來源。\n\n" +
+    "7. Railway 支援公開網址、自訂網域與 HTTPS/SSL，不要寫成不支援或無 SSL。\n" +
+    "8. Tavily 用量不要寫成 Qwen token usage；本專案以搜尋次數估算，實際額度以 Tavily 後台為準。\n" +
+    "9. 不確定、來源不足或可能變動的內容請改成保守說法，不要下絕對結論。\n" +
+    "10. 不要在正文列出來源段落或網址；系統會在下方顯示來源。\n\n" +
     `使用者問題：\n${latest}\n\n` +
     `目前來源：\n${sourceSummary(sources)}\n\n` +
     `待檢查回答：\n${reply}`;
