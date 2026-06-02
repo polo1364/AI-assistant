@@ -1285,6 +1285,8 @@ app.post("/api/confirm-write", async (req, res) => {
     res.json({
       ok: true,
       path: safe.relative,
+      absolutePath: safe.absolute,
+      projectRoot: PROJECT_ROOT,
       message: `已寫入 ${safe.relative}。`,
       verified: true,
       beforeHash,
@@ -1296,6 +1298,17 @@ app.post("/api/confirm-write", async (req, res) => {
   } catch (error) {
     res.status(400).json({ error: error.message || "確認寫入失敗。" });
   }
+});
+
+app.get("/api/runtime", (req, res) => {
+  res.json({
+    projectRoot: PROJECT_ROOT,
+    cwd: process.cwd(),
+    nodeEnv: process.env.NODE_ENV || "",
+    platform: process.platform,
+    pid: process.pid,
+    localOnlyNotice: "工作 Agent 寫入檔案只會修改此後端所在機器的專案資料夾。若使用 Railway 或遠端網址，不會修改你桌面的本機檔案。"
+  });
 });
 
 app.post("/api/ask", async (req, res) => {

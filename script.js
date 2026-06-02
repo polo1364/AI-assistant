@@ -36,6 +36,7 @@ let usage = {
 let conversation = [];
 let currentWorkPlan = null;
 let currentWorkGoal = "";
+let workRuntime = null;
 
 const DB_NAME = "qwen_assistant_db";
 const DB_VERSION = 1;
@@ -347,11 +348,59 @@ function closeModal(id) {
 function resetWorkAgentModal() {
   currentWorkPlan = null;
   currentWorkGoal = "";
+  workRuntime = null;
   document.getElementById("workPlanBox").classList.add("hidden");
   document.getElementById("workResultBox").classList.add("hidden");
   document.getElementById("workPlanBox").innerHTML = "";
   document.getElementById("workResultBox").innerHTML = "";
   document.getElementById("workExecuteBtn").disabled = true;
+  renderWorkRuntime(null);
+  loadWorkRuntime();
+}
+
+function isLocalWorkHost() {
+  const host = window.location.hostname;
+  return host === "localhost" ||
+    host === "127.0.0.1" ||
+    host === "::1" ||
+    /^192\.168\./.test(host) ||
+    /^10\./.test(host) ||
+    /^172\.(1[6-9]|2\d|3[0-1])\./.test(host);
+}
+
+function renderWorkRuntime(runtime) {
+  const box = document.getElementById("workRuntimeBox");
+  if (!box) return;
+  if (!runtime) {
+    box.className = "work-runtime";
+    box.textContent = "正在確認目前後端位置...";
+    return;
+  }
+
+  const local = isLocalWorkHost();
+  box.className = `work-runtime ${local ? "local" : "remote"}`;
+  box.innerHTML = `
+    <strong>${local ? "本機模式" : "遠端模式"}</strong><br>
+    後端專案根目錄：<code>${escapeHtml(runtime.projectRoot || "未知")}</code><br>
+    目前網址：<code>${escapeHtml(window.location.href)}</code><br>
+    ${local ? "確認寫入會修改上方後端所在資料夾。" : "遠端網址無法修改你桌面的本機專案，確認寫入已停用。"}
+  `;
+}
+
+async function loadWorkRuntime() {
+  try {
+    const response = await fetch("/api/runtime");
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error || "讀取 runtime 失敗");
+    workRuntime = data;
+    renderWorkRuntime(data);
+  } catch (error) {
+    const box = document.getElementById("workRuntimeBox");
+    if (box) {
+      box.className = "work-runtime remote";
+      box.textContent = "無法確認目前後端位置，為安全起見請勿寫入。";
+    }
+  }
 }
 
 function renderWorkPlan(plan) {
@@ -461,6 +510,10 @@ async function executeWorkPlan() {
 
 async function confirmWorkWrite(token, button) {
   if (!token) return;
+  if (!isLocalWorkHost()) {
+    alert("目前不是本機網址。工作 Agent 寫入只會修改後端所在機器，遠端網址無法修改你桌面的專案檔案。請改用 http://localhost:3000。");
+    return;
+  }
   if (!confirm("確認要寫入這個 diff 嗎？此動作會修改專案檔案。")) return;
 
   const status = document.createElement("div");

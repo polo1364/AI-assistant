@@ -840,6 +840,34 @@ textarea:focus {
   background: rgba(255, 255, 255, 0.04);
 }
 
+.work-runtime {
+  margin-top: 12px;
+  padding: 11px 13px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  color: var(--muted);
+  background: rgba(255, 255, 255, 0.035);
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.work-runtime.local {
+  border-color: rgba(52, 211, 153, 0.38);
+  color: #bbf7d0;
+  background: rgba(16, 185, 129, 0.1);
+}
+
+.work-runtime.remote {
+  border-color: rgba(248, 113, 113, 0.4);
+  color: #fecaca;
+  background: rgba(248, 113, 113, 0.12);
+}
+
+.work-runtime code {
+  color: #ffffff;
+  word-break: break-all;
+}
+
 .work-box h3,
 .work-box h4 {
   margin: 0 0 10px;
