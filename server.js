@@ -377,6 +377,17 @@ function getProjectFactAnswer(userMessages) {
     };
   }
 
+  if (/Qwen|Tavily|Railway/i.test(latest) && /各自|負責|角色|做什麼|用途|分工/i.test(latest)) {
+    return {
+      reply:
+        "結論：在本專案中，Qwen 負責核心文字理解、整理與回答；Tavily 負責即時網路搜尋與外部資料補充；Railway 負責部署這個 Node.js + 前端專案並提供線上網址。\n\n" +
+        `依據：前端透過 \`${PROJECT_FACTS.endpoint}\` 呼叫 Express 後端；後端依需求把對話送到 Qwen，若需要查資料則呼叫 Tavily REST API 的 \`${PROJECT_FACTS.tavilyMode}\`；整個專案部署目標是 ${PROJECT_FACTS.deployment}。\n\n` +
+        "風險：Qwen 模型可用性仍需用實際 API Key 測試帳號權限、地區端點與模型是否開通；Tavily 實際額度以官方後台為準；API Key 存在瀏覽器 localStorage，需注意 XSS 與公用裝置風險。\n\n" +
+        "建議下一步：部署後測試線上網址是否能正常呼叫 Qwen；開啟查證或高準確模式測試 Tavily 來源顯示；確認設定視窗的清除 Key 功能與用量面板都能正常使用。",
+      fact: "service_roles"
+    };
+  }
+
   if (/(API\s*Key|Key|金鑰).*(\.env|環境變數|存在|儲存|存在哪|放哪|保存)|(\.env|環境變數).*(API\s*Key|Key|金鑰)/i.test(latest)) {
     return {
       reply: "不是存在 .env。API Key 由使用者在前端設定視窗輸入，存在瀏覽器 localStorage；後端只代理轉發，不落地儲存。",
