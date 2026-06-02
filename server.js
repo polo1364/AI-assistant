@@ -11,17 +11,19 @@ app.use(express.static(path.join(__dirname)));
 const SYSTEM_PROMPT =
   "你是一位繁體中文低成本 Agent 助理。請用清楚、實用、可直接複製的方式回答。" +
   "優先簡潔回答，避免不必要的冗長內容，以節省 token。" +
-  "只有當問題需要最新資訊、查證事實、價格、新聞、即時資料或指定網頁資訊時，才使用 web_search 工具。";
+  "只有當問題需要最新資訊、查證事實、價格、新聞、即時資料或指定網頁資訊時，才使用 web_search 工具。" +
+  "涉及官方 API、模型、定價、文件、部署或產品能力時，必須優先使用官方文件；官方來源與第三方來源衝突時，以官方來源為準。";
 
 const SEARCH_SYSTEM_PROMPT =
   SYSTEM_PROMPT +
-  "請依據搜尋結果回答；若搜尋結果不足以回答，請誠實說明。請勿杜撰未出現在搜尋結果的事實。回答結尾請列出引用來源編號。";
+  "請依據搜尋結果回答；若搜尋結果不足以回答，請誠實說明。請勿杜撰未出現在搜尋結果的事實。" +
+  "搜尋結果標示為「官方來源」者可信度最高。若沒有官方來源，請避免對官方能力下絕對結論。回答結尾請列出引用來源編號。";
 
 const WEB_SEARCH_TOOL = {
   type: "function",
   function: {
     name: "web_search",
-    description: "用 Tavily 搜尋網路資料。只在需要最新資訊、事實查證、價格、新聞、即時資料或指定網站內容時使用。",
+    description: "用 Tavily 搜尋網路資料。只在需要最新資訊、事實查證、價格、新聞、即時資料或指定網站內容時使用。查 API、模型、定價或官方能力時，query 請明確加入 official docs / 官方文件。",
     parameters: {
       type: "object",
       properties: {
@@ -36,6 +38,47 @@ const WEB_SEARCH_TOOL = {
 };
 
 async function tavilySearch(query, tavilyKey) {
+  const officialQwenQuery = isOfficialQwenQuery(query);
+  const searchBody = {
+    query: officialQwenQuery ? `${query} official documentation OpenAI compatible API DashScope Model Studio` : query,
+    search_depth: "basic",
+    max_results: 3,
+    include_answer: true
+  };
+
+  if (officialQwenQuery) {
+    searchBody.include_domains = [
+      "qwen.ai",
+      "docs.qwencloud.com",
+      "alibabacloud.com",
+      "help.aliyun.com",
+      "modelstudio.alibabacloud.com"
+    ];
+  }
+
+  const resp = await fetch("https://api.tavily.com/search", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${tavilyKey}`,
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify(searchBody)
+  });
+
+  const data = await resp.json();
+  if (!resp.ok) {
+    const err = new Error("Tavily 搜尋失敗");
+    err.detail = data;
+    err.status = resp.status;
+    throw err;
+  }
+  if (officialQwenQuery && (!Array.isArray(data.results) || data.results.length === 0)) {
+    return tavilySearchWithoutDomainLimit(query, tavilyKey);
+  }
+  return data;
+}
+
+async function tavilySearchWithoutDomainLimit(query, tavilyKey) {
   const resp = await fetch("https://api.tavily.com/search", {
     method: "POST",
     headers: {
@@ -43,7 +86,7 @@ async function tavilySearch(query, tavilyKey) {
       "Content-Type": "application/json"
     },
     body: JSON.stringify({
-      query,
+      query: `${query} official documentation`,
       search_depth: "basic",
       max_results: 3,
       include_answer: true
@@ -60,9 +103,33 @@ async function tavilySearch(query, tavilyKey) {
   return data;
 }
 
+function isOfficialQwenQuery(query) {
+  const q = String(query || "").toLowerCase();
+  const mentionsQwen = /qwen|dashscope|model studio|阿里雲|通義|千問/.test(q);
+  const mentionsApi = /api|openai|compatible|compatibility|相容|兼容|官方|文件|docs|endpoint|base url|模型/.test(q);
+  return mentionsQwen && mentionsApi;
+}
+
+function isOfficialSource(url) {
+  try {
+    const host = new URL(url).hostname.replace(/^www\./, "");
+    return [
+      "qwen.ai",
+      "docs.qwencloud.com",
+      "alibabacloud.com",
+      "help.aliyun.com",
+      "modelstudio.alibabacloud.com"
+    ].some((domain) => host === domain || host.endsWith(`.${domain}`));
+  } catch (e) {
+    return false;
+  }
+}
+
 function buildSearchContext(tavilyData) {
-  const results = Array.isArray(tavilyData.results) ? tavilyData.results : [];
-  const sources = results.map((r) => ({ title: r.title, url: r.url }));
+  const results = (Array.isArray(tavilyData.results) ? tavilyData.results : []).sort((a, b) => {
+    return Number(isOfficialSource(b.url)) - Number(isOfficialSource(a.url));
+  });
+  const sources = results.map((r) => ({ title: r.title, url: r.url, official: isOfficialSource(r.url) }));
 
   let context = "";
   if (tavilyData.answer) {
@@ -70,7 +137,8 @@ function buildSearchContext(tavilyData) {
   }
   context += "搜尋結果：\n";
   results.forEach((r, i) => {
-    context += `[${i + 1}] 標題：${r.title}\n網址：${r.url}\n內容：${r.content}\n\n`;
+    const sourceType = isOfficialSource(r.url) ? "官方來源" : "第三方來源";
+    context += `[${i + 1}] ${sourceType}\n標題：${r.title}\n網址：${r.url}\n內容：${r.content}\n\n`;
   });
 
   return { context, sources };
