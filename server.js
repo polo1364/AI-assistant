@@ -17,7 +17,8 @@ const SYSTEM_PROMPT =
 const SEARCH_SYSTEM_PROMPT =
   SYSTEM_PROMPT +
   "請依據搜尋結果回答；若搜尋結果不足以回答，請誠實說明。請勿杜撰未出現在搜尋結果的事實。" +
-  "搜尋結果標示為「官方來源」者可信度最高。若沒有官方來源，請避免對官方能力下絕對結論。回答結尾請列出引用來源編號。";
+  "搜尋結果標示為「官方來源」者可信度最高。若沒有官方來源，請避免對官方能力下絕對結論。" +
+  "回答結尾固定使用一般編號清單列出來源，格式為「來源：\\n1. 標題 — URL」。不要使用 > 引用格式。";
 
 const WEB_SEARCH_TOOL = {
   type: "function",
@@ -126,16 +127,20 @@ function isOfficialSource(url) {
 }
 
 function buildSearchContext(tavilyData) {
-  const results = (Array.isArray(tavilyData.results) ? tavilyData.results : []).sort((a, b) => {
+  let results = (Array.isArray(tavilyData.results) ? tavilyData.results : []).sort((a, b) => {
     return Number(isOfficialSource(b.url)) - Number(isOfficialSource(a.url));
   });
+  const officialResults = results.filter((r) => isOfficialSource(r.url));
+  if (officialResults.length > 0) {
+    results = officialResults;
+  }
   const sources = results.map((r) => ({ title: r.title, url: r.url, official: isOfficialSource(r.url) }));
 
   let context = "";
   if (tavilyData.answer) {
-    context += `搜尋摘要：${tavilyData.answer}\n\n`;
+    context += `搜尋摘要（僅供參考，若與官方來源衝突請忽略）：${tavilyData.answer}\n\n`;
   }
-  context += "搜尋結果：\n";
+  context += "搜尋結果（若已篩選到官方來源，下列內容只包含官方來源）：\n";
   results.forEach((r, i) => {
     const sourceType = isOfficialSource(r.url) ? "官方來源" : "第三方來源";
     context += `[${i + 1}] ${sourceType}\n標題：${r.title}\n網址：${r.url}\n內容：${r.content}\n\n`;
