@@ -13,14 +13,17 @@ const SYSTEM_PROMPT =
   "優先簡潔回答，避免不必要的冗長內容，以節省 token。" +
   "只有當問題需要最新資訊、查證事實、價格、新聞、即時資料或指定網頁資訊時，才使用 web_search 工具。" +
   "涉及官方 API、模型、定價、文件、部署或產品能力時，必須優先使用官方文件；官方來源與第三方來源衝突時，以官方來源為準。" +
-  "本專案現況：前端是原生 HTML/CSS/JavaScript，不使用 React/Vue；後端是 Node.js + Express 的代理 server.js；部署目標是 Railway；Qwen/Tavily Key 由使用者在前端 modal 自填並存在 localStorage；伺服器不儲存 Key，也不需要 .env 放 API Key；Tavily 直接用 REST API，不使用 LangChain。" +
-  "回答本專案架構、部署或下一步時，必須依照上述現況，不要建議改用 React/Vue、LangChain 或伺服器環境變數存 API Key，除非使用者明確要求改架構。" +
+  "本專案現況：前端是原生 HTML/CSS/JavaScript，不使用 React/Vue；後端是 Node.js + Express 的代理 server.js；部署目標是 Railway；前端呼叫的後端端點是 /api/ask，不是 /api/chat；Qwen/Tavily Key 由使用者在前端 modal 自填並存在 localStorage；每次請求會把 Key 傳給自己的 Express 代理後端，由後端呼叫 Qwen/Tavily；伺服器只轉發使用，不落地儲存 Key，也不需要 .env 放 API Key；Tavily 直接用 REST API，不使用 LangChain。" +
+  "回答本專案架構、部署或下一步時，必須依照上述現況，不要建議 /api/chat、React/Vue、LangChain 或伺服器環境變數存 API Key，除非使用者明確要求改架構。" +
+  "下一步清單不要用已完成勾選符號，除非使用者明確表示那些事項已完成；未完成事項請用一般條列或待辦語氣。" +
+  "若問題是比較、架構、部署、API 能力或決策建議，請固定使用「結論、依據、風險、建議下一步」四段格式；每個結論必須能被搜尋結果或本專案現況支撐。" +
   "不要使用 > 引用格式輸出提示區塊。";
 
 const SEARCH_SYSTEM_PROMPT =
   SYSTEM_PROMPT +
   "請依據搜尋結果回答；若搜尋結果不足以回答，請誠實說明。請勿杜撰未出現在搜尋結果的事實。" +
   "搜尋結果標示為「官方來源」者可信度最高。若沒有官方來源，請避免對官方能力下絕對結論。" +
+  "若來源彼此矛盾，請明確指出矛盾並以官方來源為準。" +
   "不要在回答正文中列出「來源」段落、網址或引用清單；系統會在回答下方自動顯示來源。不要使用 > 引用格式。";
 
 const WEB_SEARCH_TOOL = {
@@ -41,23 +44,61 @@ const WEB_SEARCH_TOOL = {
   }
 };
 
+const OFFICIAL_DOMAINS = {
+  qwen: [
+    "qwen.ai",
+    "docs.qwencloud.com",
+    "alibabacloud.com",
+    "help.aliyun.com",
+    "modelstudio.alibabacloud.com"
+  ],
+  tavily: [
+    "tavily.com",
+    "docs.tavily.com"
+  ],
+  railway: [
+    "railway.app",
+    "docs.railway.com"
+  ]
+};
+
+function classifySearch(query) {
+  const q = String(query || "").toLowerCase();
+  const profiles = [];
+  if (/qwen|dashscope|model studio|阿里雲|通義|千問|openai-compatible|openai compatible|相容|兼容/.test(q)) {
+    profiles.push("qwen");
+  }
+  if (/tavily|塔维利|搜尋 api|搜索 api|search api/.test(q)) {
+    profiles.push("tavily");
+  }
+  if (/railway|deploy|部署|node\.js|nodejs|hosting|host/.test(q)) {
+    profiles.push("railway");
+  }
+
+  const domains = [...new Set(profiles.flatMap((p) => OFFICIAL_DOMAINS[p] || []))];
+  const officialPreferred = domains.length > 0;
+  const suffix = officialPreferred
+    ? ` official documentation ${profiles.join(" ")}`
+    : "";
+  return {
+    profiles,
+    domains,
+    officialPreferred,
+    query: `${query}${suffix}`.trim()
+  };
+}
+
 async function tavilySearch(query, tavilyKey) {
-  const officialQwenQuery = isOfficialQwenQuery(query);
+  const profile = classifySearch(query);
   const searchBody = {
-    query: officialQwenQuery ? `${query} official documentation OpenAI compatible API DashScope Model Studio` : query,
+    query: profile.query,
     search_depth: "basic",
     max_results: 3,
     include_answer: true
   };
 
-  if (officialQwenQuery) {
-    searchBody.include_domains = [
-      "qwen.ai",
-      "docs.qwencloud.com",
-      "alibabacloud.com",
-      "help.aliyun.com",
-      "modelstudio.alibabacloud.com"
-    ];
+  if (profile.officialPreferred) {
+    searchBody.include_domains = profile.domains;
   }
 
   const resp = await fetch("https://api.tavily.com/search", {
@@ -76,7 +117,7 @@ async function tavilySearch(query, tavilyKey) {
     err.status = resp.status;
     throw err;
   }
-  if (officialQwenQuery && (!Array.isArray(data.results) || data.results.length === 0)) {
+  if (profile.officialPreferred && (!Array.isArray(data.results) || data.results.length === 0)) {
     return tavilySearchWithoutDomainLimit(query, tavilyKey);
   }
   return data;
@@ -107,23 +148,12 @@ async function tavilySearchWithoutDomainLimit(query, tavilyKey) {
   return data;
 }
 
-function isOfficialQwenQuery(query) {
-  const q = String(query || "").toLowerCase();
-  const mentionsQwen = /qwen|dashscope|model studio|阿里雲|通義|千問/.test(q);
-  const mentionsApi = /api|openai|compatible|compatibility|相容|兼容|官方|文件|docs|endpoint|base url|模型/.test(q);
-  return mentionsQwen && mentionsApi;
-}
-
 function isOfficialSource(url) {
   try {
     const host = new URL(url).hostname.replace(/^www\./, "");
-    return [
-      "qwen.ai",
-      "docs.qwencloud.com",
-      "alibabacloud.com",
-      "help.aliyun.com",
-      "modelstudio.alibabacloud.com"
-    ].some((domain) => host === domain || host.endsWith(`.${domain}`));
+    return Object.values(OFFICIAL_DOMAINS)
+      .flat()
+      .some((domain) => host === domain || host.endsWith(`.${domain}`));
   } catch (e) {
     return false;
   }
@@ -193,7 +223,7 @@ async function callQwen({ baseUrl, qwenKey, model, messages, tools, toolChoice }
     temperature: 0.5
   };
   if (tools) body.tools = tools;
-  if (toolChoice) body.tool_choice = toolChoice;
+  if (toolChoice && tools) body.tool_choice = toolChoice;
 
   const resp = await fetch(`${baseUrl}/chat/completions`, {
     method: "POST",
@@ -212,6 +242,53 @@ async function callQwen({ baseUrl, qwenKey, model, messages, tools, toolChoice }
     throw err;
   }
   return data;
+}
+
+function shouldSelfCheck({ searchMode, sources, userMessages }) {
+  if (searchMode !== "off" && Array.isArray(sources) && sources.length > 0) return true;
+  const latest = userMessages[userMessages.length - 1]?.content || "";
+  return /架構|部署|api|official|官方|railway|tavily|qwen|openai|compatible|相容|兼容/i.test(latest);
+}
+
+function sourceSummary(sources) {
+  if (!Array.isArray(sources) || sources.length === 0) return "無來源。";
+  return sources
+    .slice(0, 6)
+    .map((s, i) => `${i + 1}. ${s.official ? "官方" : "第三方"}：${s.title || "未命名"} — ${s.url}`)
+    .join("\n");
+}
+
+async function selfCheckAnswer({ reply, sources, userMessages, qwenKey, model, baseUrl }) {
+  const latest = userMessages[userMessages.length - 1]?.content || "";
+  const checkPrompt =
+    "請做最終自我檢查並直接輸出修正版回答，不要輸出檢查過程。\n" +
+    "檢查規則：\n" +
+    "1. 結論必須被來源或本專案現況支撐；沒有支撐就改成保守說法。\n" +
+    "2. 不要把第三方來源當官方結論；官方與第三方衝突時以官方為準。\n" +
+    "3. 本專案固定使用 /api/ask，不是 /api/chat。\n" +
+    "4. 本專案不用 React/Vue、不用 LangChain、不用 .env 存 API Key。\n" +
+    "5. Key 流程是前端 localStorage 保存，每次請求傳給 Express 代理，後端只轉發不儲存。\n" +
+    "6. 若是架構/部署/API 題，使用「結論、依據、風險、建議下一步」格式。\n" +
+    "7. 不要在正文列出來源段落或網址；系統會在下方顯示來源。\n\n" +
+    `使用者問題：\n${latest}\n\n` +
+    `目前來源：\n${sourceSummary(sources)}\n\n` +
+    `待檢查回答：\n${reply}`;
+
+  const checked = await callQwen({
+    baseUrl,
+    qwenKey,
+    model,
+    messages: [
+      { role: "system", content: SYSTEM_PROMPT },
+      { role: "user", content: checkPrompt }
+    ],
+    toolChoice: "none"
+  });
+
+  return {
+    reply: stripInlineSources(checked.choices?.[0]?.message?.content || reply),
+    usage: checked.usage || null
+  };
 }
 
 async function runForceSearch({ userMessages, qwenKey, tavilyKey, model, baseUrl }) {
@@ -388,6 +465,20 @@ app.post("/api/ask", async (req, res) => {
       baseUrl: usedBaseUrl,
       searchMode: usedSearchMode
     });
+
+    if (shouldSelfCheck({ searchMode: usedSearchMode, sources: result.sources, userMessages: normalizedMessages })) {
+      result.steps = [...(result.steps || []), "執行最終自我檢查，修正來源與專案事實"];
+      const checked = await selfCheckAnswer({
+        reply: result.reply,
+        sources: result.sources,
+        userMessages: normalizedMessages,
+        qwenKey,
+        model: usedModel,
+        baseUrl: usedBaseUrl
+      });
+      result.reply = checked.reply;
+      mergeUsage(result.usage, checked.usage);
+    }
 
     res.json({
       reply: result.reply,
