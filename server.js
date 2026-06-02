@@ -358,6 +358,54 @@ function buildConfidence({ sources, violations, searchCount, userMessages }) {
   };
 }
 
+function getProjectFactAnswer(userMessages) {
+  const latest = userMessages?.[userMessages.length - 1]?.content || "";
+  const mentionsThisProject = /這個專案|本專案|目前專案|這專案|專案/i.test(latest);
+  if (!mentionsThisProject) return null;
+
+  if (/後端.*端點|端點.*後端|API.*端點|endpoint/i.test(latest)) {
+    return {
+      reply: `本專案後端端點是 \`${PROJECT_FACTS.endpoint}\`。`,
+      fact: "backend_endpoint"
+    };
+  }
+
+  if (/React|Vue|框架|前端框架/i.test(latest)) {
+    return {
+      reply: "沒有，前端是原生 HTML / CSS / JavaScript。",
+      fact: "frontend_stack"
+    };
+  }
+
+  if (/(API\s*Key|Key|金鑰).*(\.env|環境變數|存在|儲存|存在哪|放哪|保存)|(\.env|環境變數).*(API\s*Key|Key|金鑰)/i.test(latest)) {
+    return {
+      reply: "不是存在 .env。API Key 由使用者在前端設定視窗輸入，存在瀏覽器 localStorage；後端只代理轉發，不落地儲存。",
+      fact: "key_storage"
+    };
+  }
+
+  return null;
+}
+
+function projectFactResponse(factAnswer) {
+  return {
+    reply: factAnswer.reply,
+    sources: [],
+    usage: { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 },
+    searchCount: 0,
+    searchMode: "off",
+    steps: [
+      `Project facts：命中 ${factAnswer.fact}`,
+      "直接使用本專案固定事實回答，未呼叫模型或搜尋"
+    ],
+    confidence: {
+      level: "high",
+      label: "高",
+      reason: "此問題可由本專案固定事實直接確認。"
+    }
+  };
+}
+
 function shouldRefuseOrDefer({ sources, searchMode, userMessages, violations }) {
   const latest = userMessages?.[userMessages.length - 1]?.content || "";
   const highRisk = isHighRiskQuestion(latest);
@@ -846,6 +894,12 @@ app.post("/api/ask", async (req, res) => {
     if (normalizedMessages.length === 0 || !normalizedMessages.some((m) => m.role === "user" && m.content.trim())) {
       return res.status(400).json({ error: "缺少 message" });
     }
+
+    const factAnswer = getProjectFactAnswer(normalizedMessages);
+    if (factAnswer) {
+      return res.json(projectFactResponse(factAnswer));
+    }
+
     if (!qwenKey) {
       return res.status(400).json({ error: "缺少 Qwen API Key，請在設定中填入。" });
     }
