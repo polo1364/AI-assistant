@@ -24,6 +24,9 @@ const SYSTEM_PROMPT =
   "回答任何問題時都要遵守正確率規則：只把有來源、使用者提供內容或明確專案事實支撐的內容寫成肯定句；不確定、來源不足或可能變動的內容要明確標示為「需確認」或「根據目前資料」；不要把推測寫成事實；不要補不存在的功能、檔案、端點或設定。" +
   "若問題需要最新資訊、官方政策、價格、限制、部署能力或第三方服務狀態，必須搜尋或明確說明需要查官方來源；官方來源不足時不可下絕對結論。" +
   "Railway 支援產生公開網址、自訂網域與 HTTPS/SSL，不要說 Railway 不支援自訂網域或無 SSL。Tavily 不以 Qwen token usage 方式回傳用量；本專案以搜尋次數統計 Tavily 用量，實際額度以 Tavily 後台為準。" +
+  "Qwen Flash 系列通常可透過 OpenAI-compatible API 使用；回答時不要說無法確認 qwen-flash 是否兼容，應改為提醒需用實際 API Key 測試帳號權限、地區端點與模型可用性。" +
+  "本專案 /api/ask 已使用 OpenAI-compatible chat/completions 格式，不要建議改為該格式；只能建議確認 baseUrl、model、messages、Authorization header 是否正確。" +
+  "Tavily 預設使用 /search 以控制成本；/research 只作為進階深度研究選項，不要列為必要下一步。" +
   "不要使用 > 引用格式輸出提示區塊。";
 
 const SEARCH_SYSTEM_PROMPT =
@@ -277,7 +280,10 @@ async function selfCheckAnswer({ reply, sources, userMessages, qwenKey, model, b
     "7. Railway 支援公開網址、自訂網域與 HTTPS/SSL，不要寫成不支援或無 SSL。\n" +
     "8. Tavily 用量不要寫成 Qwen token usage；本專案以搜尋次數估算，實際額度以 Tavily 後台為準。\n" +
     "9. 不確定、來源不足或可能變動的內容請改成保守說法，不要下絕對結論。\n" +
-    "10. 不要在正文列出來源段落或網址；系統會在下方顯示來源。\n\n" +
+    "10. 不要說 qwen-flash 無法確認是否兼容；應改為提醒測試帳號權限、地區端點與模型可用性。\n" +
+    "11. 不要建議把 /api/ask 改成 OpenAI-compatible 格式，因為目前已是該格式；只能建議確認 baseUrl、model、messages、Authorization header。\n" +
+    "12. 不要把 Tavily /research 列為必要下一步；/research 僅是進階選項，預設用 /search 控成本。\n" +
+    "13. 不要在正文列出來源段落或網址；系統會在下方顯示來源。\n\n" +
     `使用者問題：\n${latest}\n\n` +
     `目前來源：\n${sourceSummary(sources)}\n\n` +
     `待檢查回答：\n${reply}`;
