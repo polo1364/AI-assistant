@@ -494,7 +494,7 @@ async function renderHistory() {
     loadBtn.textContent = "載入";
     loadBtn.onclick = () => {
       addMessage("user", r.question);
-      addMessage("ai", r.reply, r.sources);
+      addMessage("ai", r.reply, r.sources, r.steps);
       closeModal("historyModal");
     };
 
@@ -611,7 +611,7 @@ function renderMarkdown(md) {
   return html;
 }
 
-function addMessage(role, text, sources) {
+function addMessage(role, text, sources, steps) {
   const div = document.createElement("div");
   div.className = `message ${role}`;
 
@@ -625,6 +625,23 @@ function addMessage(role, text, sources) {
   div.appendChild(body);
 
   if (role === "ai") {
+    if (Array.isArray(steps) && steps.length > 0) {
+      const trace = document.createElement("div");
+      trace.className = "agent-trace";
+      const traceTitle = document.createElement("div");
+      traceTitle.className = "agent-trace-title";
+      traceTitle.textContent = "Agent 流程";
+      trace.appendChild(traceTitle);
+      const list = document.createElement("ol");
+      steps.forEach((step) => {
+        const li = document.createElement("li");
+        li.textContent = step;
+        list.appendChild(li);
+      });
+      trace.appendChild(list);
+      div.appendChild(trace);
+    }
+
     if (Array.isArray(sources) && sources.length > 0) {
       const box = document.createElement("div");
       box.className = "sources";
@@ -678,6 +695,23 @@ function resetConversation() {
   chatBox.appendChild(div);
 }
 
+function fallbackAgentSteps(searchMode, searchCount) {
+  if (searchMode === "off") {
+    return ["關閉搜尋：直接由 Qwen 回答"];
+  }
+  if (searchMode === "force") {
+    return [
+      "強制搜尋模式：先使用 Tavily 查資料",
+      "將搜尋結果交給 Qwen 整理回答"
+    ];
+  }
+  return [
+    "自動模式：Qwen 判斷是否需要搜尋",
+    searchCount > 0 ? `判斷結果：已使用 Tavily 搜尋 ${searchCount} 次` : "判斷結果：不需要搜尋，直接回答",
+    "Qwen 產生最終回答"
+  ];
+}
+
 async function sendMessage() {
   const text = userInput.value.trim();
   if (!text) {
@@ -729,7 +763,10 @@ async function sendMessage() {
     if (!response.ok) {
       addMessage("ai", `發生錯誤：${data.error || response.status}${data.detail ? "\n" + JSON.stringify(data.detail) : ""}`);
     } else if (data.reply) {
-      addMessage("ai", data.reply, data.sources);
+      const agentSteps = Array.isArray(data.steps) && data.steps.length > 0
+        ? data.steps
+        : fallbackAgentSteps(searchMode, data.searchCount || 0);
+      addMessage("ai", data.reply, data.sources, agentSteps);
       recordUsage({
         inTokens: data.usage?.prompt_tokens || 0,
         outTokens: data.usage?.completion_tokens || 0,
@@ -742,6 +779,7 @@ async function sendMessage() {
         question: text,
         reply: data.reply,
         sources: data.sources || [],
+        steps: agentSteps,
         searched: (data.searchCount || 0) > 0
       });
     } else {
