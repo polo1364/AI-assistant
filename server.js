@@ -57,6 +57,8 @@ const SYSTEM_PROMPT =
   "目前 UI 是文字聊天介面，不支援圖片、語音或多模態輸入，不要宣稱本專案支援多模態。現在模型選項為 qwen-flash、qwen3.5-flash、qwen-plus、qwen3-max；預設低成本建議是 qwen-flash，需要更強再切換。" +
   "本專案目前只有 /api/ask 端點；/api/ask 已同時處理 Qwen 回答、Tavily 搜尋、自動 agent 流程、來源整理與 usage 回傳。不要建議新增 /api/search，除非使用者明確要求獨立搜尋 API。" +
   "關於 Key 安全，不要說 localStorage 完全安全或符合完整安全原則；應說第一版方便可用，但需注意 XSS、公用裝置與瀏覽器儲存風險，正式版可考慮後端 session、帳號制、短期 token 或加密儲存。" +
+  "關於後端 Map 暫存 token→Key：不要把它列為最低成本首選、零風險方案或不改架構方案。這代表後端會暫存使用者 API Key，只能列為進階方案，且必須說明 Railway 重啟會失效、多實例不共享、記憶體外洩或錯誤 log 仍有風險、XSS 仍可能竊取短期 token 並在有效期內濫用。" +
+  "Key 安全題的低成本第一版優先建議：CSP、防 XSS、禁止第三方 script、維持 HTML escape/Markdown sanitization、清除 Key 按鈕、公用裝置提醒、sessionStorage 或不記住 Key 選項、縮短本機保存時間。" +
   "回答本專案架構、部署或下一步時，必須依照上述現況，不要建議 /api/chat、React/Vue、LangChain 或伺服器環境變數存 API Key，除非使用者明確要求改架構。" +
   "下一步清單不要用已完成勾選符號，除非使用者明確表示那些事項已完成；已經存在的功能不要寫成重新實作，應改寫為確認、部署、測試線上網址或優化。" +
   "若問題是比較、架構、部署、API 能力或決策建議，請固定使用「結論、依據、風險、建議下一步」四段格式；每個結論必須能被搜尋結果或本專案現況支撐。" +
@@ -66,6 +68,8 @@ const SYSTEM_PROMPT =
   "Qwen Flash 系列通常可透過 OpenAI-compatible API 使用；回答時不要說無法確認 qwen-flash 是否兼容，應改為提醒需用實際 API Key 測試帳號權限、地區端點與模型可用性。" +
   "本專案 /api/ask 已使用 OpenAI-compatible chat/completions 格式，不要建議改為該格式；只能建議確認 baseUrl、model、messages、Authorization header 是否正確。" +
   "Tavily 預設使用 /search 以控制成本；/research 只作為進階深度研究選項，不要列為必要下一步。" +
+  "關於 Key 安全的低成本第一版，優先建議：改用 sessionStorage 或提供不記住 Key 選項、加 CSP、禁止第三方 script、強化 HTML/Markdown 防 XSS、提供清除 Key 按鈕與公用裝置提醒。" +
+  "不要把『後端以記憶體或 Map 暫存使用者 API Key』說成最低成本、成本接近零、不改架構或首選方案；那會改變本專案『後端不儲存 Key』的設計，只能列為進階方案，且必須同時說明：後端會暫存使用者 Key、Railway 重啟會失效、多實例需 Redis 或 session store、token 仍可能被 XSS 在有效期內盜用。" +
   "不要使用 > 引用格式輸出提示區塊。";
 
 const SEARCH_SYSTEM_PROMPT =
@@ -278,7 +282,9 @@ function validateAnswer(reply) {
     [/不支援自訂網域|無\s*SSL|沒有\s*SSL|不支援\s*SSL/i, "Railway 支援公開網址、自訂網域與 HTTPS/SSL。"],
     [/必須.*\/research|\/research.*必要|接入 Tavily `?\/research`? 端點/i, "Tavily /research 只是進階選項，預設用 /search 控成本。"],
     [/無法確認.*qwen-flash.*兼容|qwen-flash.*無法確認.*兼容/i, "不要說 qwen-flash 無法確認是否兼容；應提醒測試帳號權限、地區端點與模型可用性。"],
-    [/多模態|圖片|語音/i, "目前 UI 只支援文字輸入，不要宣稱本專案支援多模態、圖片或語音。"]
+    [/多模態|圖片|語音/i, "目前 UI 只支援文字輸入，不要宣稱本專案支援多模態、圖片或語音。"],
+    [/(Map|記憶體|快取|cache|暫存).{0,30}(Key|API Key|token).{0,40}(最低成本|首選|成本接近零|零風險|完全安全|不改架構)/i, "後端 Map/記憶體暫存 token→Key 只能列為進階方案，不能說成最低成本首選、零風險或不改架構。"],
+    [/(短期 token|sessionToken|token).{0,80}(即使.*XSS.*無法|XSS.*無法.*取得|安全性提升.*無法直接取得)/i, "短期 token 仍可能被 XSS 竊取並在有效期內濫用，不能說 XSS 無法造成風險。"]
   ];
 
   checks.forEach(([regex, message]) => {
@@ -287,6 +293,18 @@ function validateAnswer(reply) {
 
   if (/dashscope\.aliyuncs\.com\/compatible-mode\/v1/.test(text) && !/dashscope-intl\.aliyuncs\.com\/compatible-mode\/v1/.test(text)) {
     violations.push("本專案預設 Qwen Base URL 是國際端點 dashscope-intl.aliyuncs.com；中國區端點只能作為地區替代。");
+  }
+
+  const backendKeyCache =
+    /(後端|伺服器|server|node)/i.test(text) &&
+    /(記憶體|memory|Map|快取|cache|暫存|session\s*store|redis)/i.test(text) &&
+    /(api\s*key|key|金鑰|token)/i.test(text);
+  const framedAsCheapDefault =
+    /(最低成本|成本接近零|成本幾乎零|幾乎零成本|零成本|不改架構|無需改架構|首選|第一版|預設方案|最划算|最省)/i.test(text);
+  if (backendKeyCache && framedAsCheapDefault) {
+    violations.push(
+      "不要把『後端記憶體/Map 暫存使用者 Key』說成最低成本或首選；只能列為進階方案，並說明後端會暫存 Key、Railway 重啟失效、多實例需 Redis/session、token 仍可能被 XSS 盜用。"
+    );
   }
 
   return [...new Set(violations)];
@@ -506,7 +524,8 @@ async function selfCheckAnswer({ reply, sources, userMessages, qwenKey, model, b
     "10. 不要說 qwen-flash 無法確認是否兼容；應改為提醒測試帳號權限、地區端點與模型可用性。\n" +
     "11. 不要建議把 /api/ask 改成 OpenAI-compatible 格式，因為目前已是該格式；只能建議確認 baseUrl、model、messages、Authorization header。\n" +
     "12. 不要把 Tavily /research 列為必要下一步；/research 僅是進階選項，預設用 /search 控成本。\n" +
-    "13. 不要在正文列出來源段落或網址；系統會在下方顯示來源。\n\n" +
+    "13. 不要把『後端記憶體或 Map 暫存 token→Key』說成最低成本首選、成本接近零、零風險、不改架構或完全安全；只能列為進階方案，並說明後端會暫存使用者 API Key、Railway 重啟失效、多實例不共享或需 Redis/session store、記憶體外洩/log/debug dump 風險、token 仍可能被 XSS 盜用並在有效期內濫用。Key 安全低成本第一版優先 CSP、防 XSS、禁止第三方 script、清除 Key、公用裝置提醒、sessionStorage/不記住 Key、縮短本機保存時間。\n" +
+    "14. 不要在正文列出來源段落或網址；系統會在下方顯示來源。\n\n" +
     `使用者問題：\n${latest}\n\n` +
     `目前來源：\n${sourceSummary(sources)}\n\n` +
     `待檢查回答：\n${reply}`;
@@ -532,6 +551,7 @@ async function repairAnswer({ reply, violations, sources, userMessages, qwenKey,
   const latest = userMessages[userMessages.length - 1]?.content || "";
   const repairPrompt =
     "請根據以下硬性違規項，直接輸出修正版回答。不要解釋你做了哪些修改。\n" +
+    "若主題涉及 API Key 安全，必須分成「低成本第一版」與「進階方案」；低成本第一版優先 CSP、防 XSS、sessionStorage/不記住 Key、清除 Key、公用裝置提醒；後端 Map 暫存 token→Key 只能列為進階方案並說明風險。\n" +
     "硬性違規項：\n" +
     violations.map((v, i) => `${i + 1}. ${v}`).join("\n") +
     "\n\n本專案事實：\n" +
