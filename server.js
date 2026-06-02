@@ -8,12 +8,51 @@ app.use(cors());
 app.use(express.json({ limit: "1mb" }));
 app.use(express.static(path.join(__dirname)));
 
+const PROJECT_FACTS = {
+  title: "蝦蝦AI助理",
+  frontend: "原生 HTML/CSS/JavaScript",
+  backend: "Node.js + Express",
+  endpoint: "/api/ask",
+  qwenBaseUrl: "https://dashscope-intl.aliyuncs.com/compatible-mode/v1",
+  qwenModels: ["qwen-flash", "qwen3.5-flash", "qwen-plus", "qwen3-max"],
+  defaultModel: "qwen-flash",
+  tavilyMode: "/search",
+  deployment: "Railway",
+  files: ["index.html", "style.css", "script.js", "server.js", "package.json"],
+  keyFlow: "API Key 由前端 modal 自填並存在 localStorage，每次請求傳給 Express 代理；後端只轉發使用，不落地儲存。",
+  constraints: [
+    "不使用 React/Vue",
+    "不使用 LangChain",
+    "不使用 /api/chat",
+    "不使用 /api/search",
+    "不使用 .env 儲存 API Key",
+    "目前只支援文字輸入，不支援圖片、語音或多模態"
+  ]
+};
+
+function projectFactsText() {
+  return [
+    `本專案名稱：${PROJECT_FACTS.title}`,
+    `前端：${PROJECT_FACTS.frontend}`,
+    `後端：${PROJECT_FACTS.backend}`,
+    `唯一後端端點：${PROJECT_FACTS.endpoint}`,
+    `Qwen 預設 Base URL：${PROJECT_FACTS.qwenBaseUrl}`,
+    `模型選項：${PROJECT_FACTS.qwenModels.join(", ")}；預設 ${PROJECT_FACTS.defaultModel}`,
+    `Tavily 預設模式：${PROJECT_FACTS.tavilyMode}`,
+    `部署平台：${PROJECT_FACTS.deployment}`,
+    `檔案結構：${PROJECT_FACTS.files.join(", ")} 位於同一層`,
+    `Key 流程：${PROJECT_FACTS.keyFlow}`,
+    `限制：${PROJECT_FACTS.constraints.join("；")}`
+  ].join("\n");
+}
+
 const SYSTEM_PROMPT =
   "你是一位繁體中文低成本 Agent 助理。請用清楚、實用、可直接複製的方式回答。" +
   "優先簡潔回答，避免不必要的冗長內容，以節省 token。" +
   "只有當問題需要最新資訊、查證事實、價格、新聞、即時資料或指定網頁資訊時，才使用 web_search 工具。" +
   "涉及官方 API、模型、定價、文件、部署或產品能力時，必須優先使用官方文件；官方來源與第三方來源衝突時，以官方來源為準。" +
-  "本專案現況：前端是原生 HTML/CSS/JavaScript，不使用 React/Vue；後端是 Node.js + Express 的代理 server.js；部署目標是 Railway；前端呼叫的後端端點是 /api/ask，不是 /api/chat；Qwen/Tavily Key 由使用者在前端 modal 自填並存在 localStorage；每次請求會把 Key 傳給自己的 Express 代理後端，由後端呼叫 Qwen/Tavily；伺服器只轉發使用，不落地儲存 Key，也不需要 .env 放 API Key；Tavily 直接用 REST API，不使用 LangChain。" +
+  `本專案事實（不可違反）：${projectFactsText()}` +
+  "前端呼叫的後端端點是 /api/ask，不是 /api/chat；Qwen/Tavily Key 由使用者在前端 modal 自填並存在 localStorage；每次請求會把 Key 傳給自己的 Express 代理後端，由後端呼叫 Qwen/Tavily；伺服器只轉發使用，不落地儲存 Key，也不需要 .env 放 API Key；Tavily 直接用 REST API，不使用 LangChain。" +
   "本專案檔案位於同一層，不是 frontend/backend 分離架構；index.html、style.css、script.js、server.js、package.json 都在同一個專案資料夾。Railway 部署時應直接部署含 package.json 的資料夾；若 GitHub repo 外層還有資料夾，才把 Root Directory 設為 qwen-ai-assistant，不要建議 /frontend 或 /backend。" +
   "目前 UI 是文字聊天介面，不支援圖片、語音或多模態輸入，不要宣稱本專案支援多模態。現在模型選項為 qwen-flash、qwen3.5-flash、qwen-plus、qwen3-max；預設低成本建議是 qwen-flash，需要更強再切換。" +
   "本專案目前只有 /api/ask 端點；/api/ask 已同時處理 Qwen 回答、Tavily 搜尋、自動 agent 流程、來源整理與 usage 回傳。不要建議新增 /api/search，除非使用者明確要求獨立搜尋 API。" +
@@ -226,6 +265,33 @@ function stripInlineSources(reply) {
     .trim();
 }
 
+function validateAnswer(reply) {
+  const text = String(reply || "");
+  const violations = [];
+  const checks = [
+    [/\/api\/chat/i, "本專案端點是 /api/ask，不是 /api/chat。"],
+    [/\/api\/search/i, "本專案目前不使用 /api/search；/api/ask 已處理搜尋與回答。"],
+    [/\bReact\b|\bVue\b/i, "本專案前端是原生 HTML/CSS/JavaScript，不使用 React/Vue。"],
+    [/LangChain|@langchain/i, "本專案直接呼叫 Tavily REST API，不使用 LangChain。"],
+    [/frontend|backend|\/frontend|\/backend/i, "本專案不是 frontend/backend 分離架構，檔案位於同一層。"],
+    [/\.env.+(API|Key|金鑰)|環境變數.+(API|Key|金鑰)/i, "本專案不使用 .env 或伺服器環境變數儲存 API Key。"],
+    [/不支援自訂網域|無\s*SSL|沒有\s*SSL|不支援\s*SSL/i, "Railway 支援公開網址、自訂網域與 HTTPS/SSL。"],
+    [/必須.*\/research|\/research.*必要|接入 Tavily `?\/research`? 端點/i, "Tavily /research 只是進階選項，預設用 /search 控成本。"],
+    [/無法確認.*qwen-flash.*兼容|qwen-flash.*無法確認.*兼容/i, "不要說 qwen-flash 無法確認是否兼容；應提醒測試帳號權限、地區端點與模型可用性。"],
+    [/多模態|圖片|語音/i, "目前 UI 只支援文字輸入，不要宣稱本專案支援多模態、圖片或語音。"]
+  ];
+
+  checks.forEach(([regex, message]) => {
+    if (regex.test(text)) violations.push(message);
+  });
+
+  if (/dashscope\.aliyuncs\.com\/compatible-mode\/v1/.test(text) && !/dashscope-intl\.aliyuncs\.com\/compatible-mode\/v1/.test(text)) {
+    violations.push("本專案預設 Qwen Base URL 是國際端點 dashscope-intl.aliyuncs.com；中國區端點只能作為地區替代。");
+  }
+
+  return [...new Set(violations)];
+}
+
 async function callQwen({ baseUrl, qwenKey, model, messages, tools, toolChoice }) {
   const body = {
     model,
@@ -305,12 +371,46 @@ async function selfCheckAnswer({ reply, sources, userMessages, qwenKey, model, b
   };
 }
 
+async function repairAnswer({ reply, violations, sources, userMessages, qwenKey, model, baseUrl }) {
+  const latest = userMessages[userMessages.length - 1]?.content || "";
+  const repairPrompt =
+    "請根據以下硬性違規項，直接輸出修正版回答。不要解釋你做了哪些修改。\n" +
+    "硬性違規項：\n" +
+    violations.map((v, i) => `${i + 1}. ${v}`).join("\n") +
+    "\n\n本專案事實：\n" +
+    projectFactsText() +
+    "\n\n使用者問題：\n" +
+    latest +
+    "\n\n可用來源：\n" +
+    sourceSummary(sources) +
+    "\n\n原回答：\n" +
+    reply;
+
+  const repaired = await callQwen({
+    baseUrl,
+    qwenKey,
+    model,
+    messages: [
+      { role: "system", content: SYSTEM_PROMPT },
+      { role: "user", content: repairPrompt }
+    ]
+  });
+
+  return {
+    reply: stripInlineSources(repaired.choices?.[0]?.message?.content || reply),
+    usage: repaired.usage || null
+  };
+}
+
 async function runForceSearch({ userMessages, qwenKey, tavilyKey, model, baseUrl }) {
+  const latestUser = [...userMessages].reverse().find((m) => m.role === "user")?.content || "";
+  const route = classifySearch(latestUser);
   const steps = [
+    `Router 分類：${route.profiles.length ? route.profiles.join(", ") : "general"}`,
+    route.officialPreferred ? `優先官方來源：${route.domains.join(", ")}` : "未限定官方來源",
     "強制搜尋模式：先使用 Tavily 查資料",
     "將搜尋結果交給 Qwen 整理回答"
   ];
-  const latestUser = [...userMessages].reverse().find((m) => m.role === "user")?.content || "";
   const tavilyData = await tavilySearch(latestUser, tavilyKey);
   const built = buildSearchContext(tavilyData);
   const qwenData = await callQwen({
@@ -338,6 +438,8 @@ async function runAgentSearch({ userMessages, qwenKey, tavilyKey, model, baseUrl
   const sources = [];
   const steps = [];
   let searchCount = 0;
+  const latestUser = [...userMessages].reverse().find((m) => m.role === "user")?.content || "";
+  const route = classifySearch(latestUser);
 
   if (searchMode === "force") {
     const result = await runForceSearch({ userMessages, qwenKey, tavilyKey, model, baseUrl });
@@ -346,6 +448,8 @@ async function runAgentSearch({ userMessages, qwenKey, tavilyKey, model, baseUrl
   }
 
   const messages = [{ role: "system", content: SYSTEM_PROMPT }, ...userMessages];
+  steps.push(`Router 分類：${route.profiles.length ? route.profiles.join(", ") : "general"}`);
+  steps.push(route.officialPreferred ? `優先官方來源：${route.domains.join(", ")}` : "未限定官方來源");
   steps.push(searchMode === "auto" ? "自動模式：Qwen 判斷是否需要搜尋" : "關閉搜尋：直接由 Qwen 回答");
   const first = await callQwen({
     baseUrl,
@@ -492,6 +596,22 @@ app.post("/api/ask", async (req, res) => {
       });
       result.reply = checked.reply;
       mergeUsage(result.usage, checked.usage);
+    }
+
+    const violations = validateAnswer(result.reply);
+    if (violations.length > 0) {
+      result.steps = [...(result.steps || []), `程式驗證發現 ${violations.length} 個事實風險，已要求重寫`];
+      const repaired = await repairAnswer({
+        reply: result.reply,
+        violations,
+        sources: result.sources,
+        userMessages: normalizedMessages,
+        qwenKey,
+        model: usedModel,
+        baseUrl: usedBaseUrl
+      });
+      result.reply = repaired.reply;
+      mergeUsage(result.usage, repaired.usage);
     }
 
     res.json({
