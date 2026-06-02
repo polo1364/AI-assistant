@@ -824,6 +824,66 @@ textarea:focus {
   background: var(--brand);
 }
 
+.modal-wide {
+  max-width: 780px;
+}
+
+.work-box {
+  margin-top: 14px;
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.work-box h3,
+.work-box h4 {
+  margin: 0 0 10px;
+}
+
+.work-meta {
+  margin-bottom: 10px;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.work-steps {
+  margin: 0;
+  padding-left: 20px;
+}
+
+.work-steps li {
+  margin: 8px 0;
+}
+
+.work-steps span {
+  color: var(--muted);
+}
+
+.patch-card {
+  margin-top: 12px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.035);
+}
+
+.patch-title {
+  font-weight: 800;
+  color: var(--brand);
+}
+
+.diff-view {
+  max-height: 320px;
+  overflow: auto;
+  white-space: pre;
+}
+
+.confirm-write-btn.written {
+  opacity: 0.72;
+  cursor: default;
+}
+
 .mini-btn.danger {
   color: #dc2626;
   border-color: #fecaca;

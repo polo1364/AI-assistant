@@ -1,8 +1,12 @@
 const express = require("express");
 const cors = require("cors");
 const path = require("path");
+const fs = require("fs");
+const crypto = require("crypto");
 
 const app = express();
+const fsp = fs.promises;
+const PROJECT_ROOT = __dirname;
 
 app.use(cors());
 app.use(express.json({ limit: "1mb" }));
@@ -29,6 +33,207 @@ const PROJECT_FACTS = {
     "目前只支援文字輸入，不支援圖片、語音或多模態"
   ]
 };
+
+const WORK_TOOLS = {
+  list_files: { risk: "low", requiresConfirm: false },
+  read_file: { risk: "low", requiresConfirm: false },
+  propose_patch: { risk: "medium", requiresConfirm: false },
+  write_file: { risk: "medium", requiresConfirm: true }
+};
+
+const ALLOWED_WORK_EXTENSIONS = new Set([".html", ".css", ".js", ".json", ".md", ".txt"]);
+const BLOCKED_PATH_PARTS = new Set(["node_modules", ".git", ".cursor", "mcps", "terminals", "agent-transcripts"]);
+const BLOCKED_FILE_PATTERN = /(^\.env$|\.env\.|secret|credential|password|cookie|private|token|api[_-]?key)/i;
+const pendingWrites = new Map();
+const WRITE_TOKEN_TTL_MS = 10 * 60 * 1000;
+
+function normalizeProjectRelativePath(inputPath) {
+  const raw = String(inputPath || "").replace(/\\/g, "/").trim();
+  if (!raw || raw.includes("\0")) throw new Error("缺少或不合法的檔案路徑。");
+  if (path.isAbsolute(raw) || /^[a-z]:\//i.test(raw)) throw new Error("只能使用專案內相對路徑。");
+
+  const resolved = path.resolve(PROJECT_ROOT, raw);
+  const relative = path.relative(PROJECT_ROOT, resolved).replace(/\\/g, "/");
+  if (!relative || relative.startsWith("..") || path.isAbsolute(relative)) {
+    throw new Error("路徑超出專案範圍。");
+  }
+
+  const parts = relative.split("/");
+  if (parts.some((part) => BLOCKED_PATH_PARTS.has(part))) {
+    throw new Error("此路徑屬於系統、依賴或內部資料，不允許操作。");
+  }
+  if (parts.some((part) => BLOCKED_FILE_PATTERN.test(part))) {
+    throw new Error("此路徑可能包含敏感資訊，不允許操作。");
+  }
+
+  const ext = path.extname(relative).toLowerCase();
+  if (!ALLOWED_WORK_EXTENSIONS.has(ext)) {
+    throw new Error(`不支援操作 ${ext || "無副檔名"} 檔案。`);
+  }
+
+  return { absolute: resolved, relative };
+}
+
+async function listProjectFiles(dir = PROJECT_ROOT, depth = 0, results = []) {
+  if (depth > 4 || results.length >= 200) return results;
+  const entries = await fsp.readdir(dir, { withFileTypes: true });
+  for (const entry of entries) {
+    if (results.length >= 200) break;
+    if (BLOCKED_PATH_PARTS.has(entry.name) || BLOCKED_FILE_PATTERN.test(entry.name)) continue;
+    const absolute = path.join(dir, entry.name);
+    const relative = path.relative(PROJECT_ROOT, absolute).replace(/\\/g, "/");
+    if (entry.isDirectory()) {
+      await listProjectFiles(absolute, depth + 1, results);
+      continue;
+    }
+    const ext = path.extname(entry.name).toLowerCase();
+    if (ALLOWED_WORK_EXTENSIONS.has(ext)) results.push(relative);
+  }
+  return results.sort();
+}
+
+async function readProjectFile(relativePath) {
+  const safe = normalizeProjectRelativePath(relativePath);
+  const stat = await fsp.stat(safe.absolute);
+  if (!stat.isFile()) throw new Error("只能讀取檔案。");
+  if (stat.size > 180_000) throw new Error("檔案過大，第一版暫不讀取。");
+  return {
+    path: safe.relative,
+    content: await fsp.readFile(safe.absolute, "utf8")
+  };
+}
+
+function pickRelevantFiles(goal, availableFiles) {
+  const text = String(goal || "");
+  const explicit = availableFiles.filter((file) => text.includes(file) || text.includes(path.basename(file)));
+  if (explicit.length > 0) return explicit.slice(0, 5);
+
+  const candidates = [];
+  if (/介面|UI|樣式|排版|顏色|css|手機|響應式/i.test(text)) candidates.push("index.html", "style.css", "script.js");
+  if (/前端|按鈕|modal|歷史|模板|indexeddb|javascript|script/i.test(text)) candidates.push("index.html", "script.js", "style.css");
+  if (/後端|api|agent|qwen|tavily|server|路由|端點/i.test(text)) candidates.push("server.js", "script.js");
+  if (/部署|railway|說明|readme|文件/i.test(text)) candidates.push("README.md", "package.json", "railway.json");
+
+  const unique = [...new Set(candidates)].filter((file) => availableFiles.includes(file));
+  return unique.length > 0 ? unique.slice(0, 5) : availableFiles.filter((file) => ["index.html", "style.css", "script.js", "server.js"].includes(file)).slice(0, 4);
+}
+
+function createUnifiedDiff(filePath, oldText, newText) {
+  if (oldText === newText) return "";
+  const oldLines = String(oldText || "").split("\n");
+  const newLines = String(newText || "").split("\n");
+  let start = 0;
+  while (start < oldLines.length && start < newLines.length && oldLines[start] === newLines[start]) start += 1;
+
+  let oldEnd = oldLines.length - 1;
+  let newEnd = newLines.length - 1;
+  while (oldEnd >= start && newEnd >= start && oldLines[oldEnd] === newLines[newEnd]) {
+    oldEnd -= 1;
+    newEnd -= 1;
+  }
+
+  const before = Math.max(0, start - 3);
+  const afterOld = Math.min(oldLines.length - 1, oldEnd + 3);
+  const afterNew = Math.min(newLines.length - 1, newEnd + 3);
+  const lines = [`--- ${filePath}`, `+++ ${filePath}`];
+
+  for (let i = before; i < start; i += 1) lines.push(` ${oldLines[i]}`);
+  for (let i = start; i <= oldEnd; i += 1) lines.push(`-${oldLines[i]}`);
+  for (let i = start; i <= newEnd; i += 1) lines.push(`+${newLines[i]}`);
+  for (let i = oldEnd + 1; i <= afterOld && i < oldLines.length; i += 1) lines.push(` ${oldLines[i]}`);
+  if (afterOld < oldLines.length - 1 || afterNew < newLines.length - 1) lines.push(" ...");
+  return lines.join("\n");
+}
+
+function cleanupPendingWrites() {
+  const now = Date.now();
+  for (const [token, item] of pendingWrites.entries()) {
+    if (now - item.createdAt > WRITE_TOKEN_TTL_MS) pendingWrites.delete(token);
+  }
+}
+
+function buildWorkPlan(goal, files) {
+  const relevantFiles = pickRelevantFiles(goal, files);
+  const steps = [
+    {
+      tool: "list_files",
+      risk: WORK_TOOLS.list_files.risk,
+      requiresConfirm: false,
+      reason: "確認本專案可操作檔案清單。"
+    },
+    ...relevantFiles.map((file) => ({
+      tool: "read_file",
+      path: file,
+      risk: WORK_TOOLS.read_file.risk,
+      requiresConfirm: false,
+      reason: `讀取 ${file} 以分析目前實作。`
+    })),
+    {
+      tool: "propose_patch",
+      risk: WORK_TOOLS.propose_patch.risk,
+      requiresConfirm: false,
+      reason: "根據目標與讀取內容產生修改建議與 diff，暫不寫入檔案。"
+    }
+  ];
+
+  return {
+    goal: String(goal || "").trim(),
+    scope: "project_only",
+    riskLevel: "medium",
+    requiresUserConfirmation: true,
+    steps
+  };
+}
+
+function fileBundleForPrompt(files) {
+  return files
+    .map((file) => `檔案：${file.path}\n\`\`\`\n${file.content.slice(0, 30000)}\n\`\`\``)
+    .join("\n\n---\n\n");
+}
+
+async function proposeProjectPatches({ goal, files, qwenKey, model, baseUrl }) {
+  if (!qwenKey) {
+    return {
+      summary: "缺少 Qwen API Key，已完成檔案讀取，但無法產生 AI 修改建議。",
+      patches: [],
+      notes: ["請先在設定填入 Qwen API Key，再執行工作 Agent。"]
+    };
+  }
+
+  const prompt =
+    "你是半自動工作 Agent。請根據使用者目標與專案檔案，提出必要修改。\n" +
+    "只能修改提供的檔案；不要新增未提供檔案；不要輸出 Markdown；只輸出 JSON。\n" +
+    "若不需要修改，patches 請回空陣列。\n" +
+    "JSON 格式：{\"summary\":\"...\",\"patches\":[{\"path\":\"index.html\",\"content\":\"完整新檔案內容\",\"reason\":\"修改原因\"}],\"notes\":[\"...\"]}\n\n" +
+    `使用者目標：${goal}\n\n` +
+    `專案檔案：\n${fileBundleForPrompt(files)}`;
+
+  const data = await callQwen({
+    baseUrl,
+    qwenKey,
+    model,
+    messages: [
+      { role: "system", content: SYSTEM_PROMPT },
+      { role: "user", content: prompt }
+    ],
+    temperature: 0.1
+  });
+
+  const parsed = safeJsonParse(data.choices?.[0]?.message?.content);
+  if (!parsed) {
+    return {
+      summary: data.choices?.[0]?.message?.content || "Qwen 沒有回傳可解析的修改建議。",
+      patches: [],
+      notes: ["模型輸出不是 JSON，因此未建立可確認寫入的 patch。"]
+    };
+  }
+
+  return {
+    summary: String(parsed.summary || "已產生修改建議。"),
+    patches: Array.isArray(parsed.patches) ? parsed.patches : [],
+    notes: Array.isArray(parsed.notes) ? parsed.notes.map(String) : []
+  };
+}
 
 function projectFactsText() {
   return [
@@ -896,6 +1101,129 @@ async function runAgentSearch({ userMessages, qwenKey, tavilyKey, model, baseUrl
     steps
   };
 }
+
+app.post("/api/plan", async (req, res) => {
+  try {
+    const { goal } = req.body || {};
+    if (!String(goal || "").trim()) {
+      return res.status(400).json({ error: "缺少工作目標。" });
+    }
+
+    const files = await listProjectFiles();
+    const plan = buildWorkPlan(goal, files);
+    res.json({
+      plan,
+      availableTools: WORK_TOOLS,
+      files: files.slice(0, 80)
+    });
+  } catch (error) {
+    res.status(400).json({ error: error.message || "產生任務計畫失敗。" });
+  }
+});
+
+app.post("/api/execute", async (req, res) => {
+  try {
+    const { goal, plan, qwenKey, model, baseUrl } = req.body || {};
+    const workGoal = String(goal || plan?.goal || "").trim();
+    if (!workGoal) return res.status(400).json({ error: "缺少工作目標。" });
+
+    const usedModel = model || "qwen-flash";
+    const usedBaseUrl = baseUrl || "https://dashscope-intl.aliyuncs.com/compatible-mode/v1";
+    const files = await listProjectFiles();
+    const readSteps = Array.isArray(plan?.steps)
+      ? plan.steps.filter((step) => step.tool === "read_file" && step.path)
+      : [];
+    const targetFiles = readSteps.length > 0
+      ? [...new Set(readSteps.map((step) => step.path))]
+      : pickRelevantFiles(workGoal, files);
+
+    const readFiles = [];
+    for (const file of targetFiles.slice(0, 6)) {
+      readFiles.push(await readProjectFile(file));
+    }
+
+    const proposal = await proposeProjectPatches({
+      goal: workGoal,
+      files: readFiles,
+      qwenKey,
+      model: usedModel,
+      baseUrl: usedBaseUrl
+    });
+
+    const patches = [];
+    for (const item of proposal.patches.slice(0, 4)) {
+      const safe = normalizeProjectRelativePath(item.path);
+      const original = readFiles.find((file) => file.path === safe.relative) || await readProjectFile(safe.relative);
+      const content = String(item.content || "");
+      if (!content || content === original.content) continue;
+
+      const diff = createUnifiedDiff(safe.relative, original.content, content);
+      if (!diff) continue;
+
+      const token = crypto.randomBytes(18).toString("hex");
+      pendingWrites.set(token, {
+        path: safe.relative,
+        content,
+        diff,
+        reason: String(item.reason || ""),
+        createdAt: Date.now()
+      });
+
+      patches.push({
+        path: safe.relative,
+        reason: String(item.reason || "套用 AI 建議修改。"),
+        diff,
+        confirmationToken: token,
+        expiresInSeconds: Math.floor(WRITE_TOKEN_TTL_MS / 1000)
+      });
+    }
+
+    cleanupPendingWrites();
+    res.json({
+      goal: workGoal,
+      steps: [
+        "list_files：已列出本專案可操作檔案",
+        ...readFiles.map((file) => `read_file：已讀取 ${file.path}`),
+        "propose_patch：已產生修改建議與 diff，尚未寫入"
+      ],
+      readFiles: readFiles.map((file) => ({
+        path: file.path,
+        size: file.content.length
+      })),
+      summary: proposal.summary,
+      notes: proposal.notes,
+      patches
+    });
+  } catch (error) {
+    res.status(400).json({ error: error.message || "執行工作計畫失敗。" });
+  }
+});
+
+app.post("/api/confirm-write", async (req, res) => {
+  try {
+    const { confirmationToken } = req.body || {};
+    cleanupPendingWrites();
+
+    const token = String(confirmationToken || "");
+    const pending = pendingWrites.get(token);
+    if (!pending) {
+      return res.status(403).json({ error: "確認 token 無效或已過期，請重新產生 diff。" });
+    }
+
+    const safe = normalizeProjectRelativePath(pending.path);
+    await fsp.writeFile(safe.absolute, pending.content, "utf8");
+    pendingWrites.delete(token);
+
+    res.json({
+      ok: true,
+      path: safe.relative,
+      message: `已寫入 ${safe.relative}。`,
+      diff: pending.diff
+    });
+  } catch (error) {
+    res.status(400).json({ error: error.message || "確認寫入失敗。" });
+  }
+});
 
 app.post("/api/ask", async (req, res) => {
   try {

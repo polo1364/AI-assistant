@@ -34,6 +34,8 @@ let usage = {
 };
 
 let conversation = [];
+let currentWorkPlan = null;
+let currentWorkGoal = "";
 
 const DB_NAME = "qwen_assistant_db";
 const DB_VERSION = 1;
@@ -334,11 +336,151 @@ function openModal(id) {
     renderTemplates();
   }
   if (id === "historyModal") renderHistory();
+  if (id === "workAgentModal") resetWorkAgentModal();
   document.getElementById(id).classList.remove("hidden");
 }
 
 function closeModal(id) {
   document.getElementById(id).classList.add("hidden");
+}
+
+function resetWorkAgentModal() {
+  currentWorkPlan = null;
+  currentWorkGoal = "";
+  document.getElementById("workPlanBox").classList.add("hidden");
+  document.getElementById("workResultBox").classList.add("hidden");
+  document.getElementById("workPlanBox").innerHTML = "";
+  document.getElementById("workResultBox").innerHTML = "";
+  document.getElementById("workExecuteBtn").disabled = true;
+}
+
+function renderWorkPlan(plan) {
+  const box = document.getElementById("workPlanBox");
+  const steps = (plan.steps || []).map((step, index) => {
+    const pathText = step.path ? ` <code>${escapeHtml(String(step.path))}</code>` : "";
+    return `<li><strong>${index + 1}. ${escapeHtml(step.tool)}</strong>${pathText}<br><span>${escapeHtml(step.reason || "")}</span></li>`;
+  }).join("");
+
+  box.innerHTML = `
+    <h3>任務計畫</h3>
+    <div class="work-meta">風險：${escapeHtml(plan.riskLevel || "medium")} / 需要確認：${plan.requiresUserConfirmation ? "是" : "否"}</div>
+    <ol class="work-steps">${steps}</ol>
+  `;
+  box.classList.remove("hidden");
+  document.getElementById("workExecuteBtn").disabled = false;
+}
+
+function renderWorkResult(data) {
+  const box = document.getElementById("workResultBox");
+  const readFiles = (data.readFiles || []).map((file) => `<li>${escapeHtml(file.path)} (${file.size} chars)</li>`).join("");
+  const notes = (data.notes || []).map((note) => `<li>${escapeHtml(note)}</li>`).join("");
+  const patches = (data.patches || []).map((patch) => `
+    <div class="patch-card">
+      <div class="patch-title">${escapeHtml(patch.path)}</div>
+      <p>${escapeHtml(patch.reason || "AI 建議修改")}</p>
+      <pre class="diff-view"><code>${escapeHtml(patch.diff || "")}</code></pre>
+      <button class="btn-primary confirm-write-btn" type="button" data-token="${escapeHtml(patch.confirmationToken)}">確認寫入</button>
+    </div>
+  `).join("");
+
+  box.innerHTML = `
+    <h3>執行結果</h3>
+    <p>${escapeHtml(data.summary || "已完成執行。")}</p>
+    ${readFiles ? `<h4>已讀取檔案</h4><ul>${readFiles}</ul>` : ""}
+    ${notes ? `<h4>備註</h4><ul>${notes}</ul>` : ""}
+    ${patches ? `<h4>待確認 diff</h4>${patches}` : "<p>沒有產生需要寫入的 diff。</p>"}
+  `;
+  box.classList.remove("hidden");
+
+  box.querySelectorAll(".confirm-write-btn").forEach((btn) => {
+    btn.addEventListener("click", () => confirmWorkWrite(btn.dataset.token, btn));
+  });
+}
+
+async function createWorkPlan() {
+  const goal = document.getElementById("workGoal").value.trim();
+  if (!goal) {
+    alert("請先輸入工作目標。");
+    return;
+  }
+
+  currentWorkGoal = goal;
+  document.getElementById("workPlanBtn").disabled = true;
+  document.getElementById("workPlanBtn").textContent = "規劃中";
+
+  try {
+    const response = await fetch("/api/plan", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ goal })
+    });
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error || "產生計畫失敗");
+    currentWorkPlan = data.plan;
+    renderWorkPlan(data.plan);
+  } catch (error) {
+    alert(error.message || "產生計畫失敗。");
+  } finally {
+    document.getElementById("workPlanBtn").disabled = false;
+    document.getElementById("workPlanBtn").textContent = "產生計畫";
+  }
+}
+
+async function executeWorkPlan() {
+  if (!currentWorkPlan) {
+    alert("請先產生任務計畫。");
+    return;
+  }
+
+  const settings = getSettings();
+  document.getElementById("workExecuteBtn").disabled = true;
+  document.getElementById("workExecuteBtn").textContent = "執行中";
+
+  try {
+    const response = await fetch("/api/execute", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        goal: currentWorkGoal,
+        plan: currentWorkPlan,
+        qwenKey: settings.qwenKey,
+        model: settings.model,
+        baseUrl: settings.baseUrl
+      })
+    });
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error || "執行計畫失敗");
+    renderWorkResult(data);
+  } catch (error) {
+    alert(error.message || "執行計畫失敗。");
+  } finally {
+    document.getElementById("workExecuteBtn").disabled = false;
+    document.getElementById("workExecuteBtn").textContent = "同意執行";
+  }
+}
+
+async function confirmWorkWrite(token, button) {
+  if (!token) return;
+  if (!confirm("確認要寫入這個 diff 嗎？此動作會修改專案檔案。")) return;
+
+  button.disabled = true;
+  button.textContent = "寫入中";
+  try {
+    const response = await fetch("/api/confirm-write", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ confirmationToken: token })
+    });
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error || "寫入失敗");
+    button.textContent = "已寫入";
+    button.classList.add("written");
+    addMessage("ai", `工作 Agent 已寫入：${data.path}`);
+  } catch (error) {
+    button.disabled = false;
+    button.textContent = "確認寫入";
+    alert(error.message || "寫入失敗。");
+  }
 }
 
 /* ---------- 自訂查詢模板 ---------- */
@@ -525,7 +667,7 @@ async function clearHistory() {
 }
 
 function escapeHtml(s) {
-  return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  return String(s ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }
 
 function renderMarkdown(md) {
@@ -827,11 +969,14 @@ function resetInputHeight() {
 /* ---------- 事件綁定 ---------- */
 document.getElementById("settingsBtn").onclick = () => openModal("settingsModal");
 document.getElementById("usageBtn").onclick = () => openModal("usageModal");
+document.getElementById("workAgentBtn").onclick = () => openModal("workAgentModal");
 document.getElementById("templatesBtn").onclick = () => openModal("templatesModal");
 document.getElementById("historyBtn").onclick = () => openModal("historyModal");
 document.getElementById("newChatBtn").onclick = resetConversation;
+document.getElementById("workPlanBtn").onclick = createWorkPlan;
+document.getElementById("workExecuteBtn").onclick = executeWorkPlan;
 
-["settingsModal", "usageModal", "templatesModal", "historyModal"].forEach((id) => {
+["settingsModal", "usageModal", "templatesModal", "historyModal", "workAgentModal"].forEach((id) => {
   const overlay = document.getElementById(id);
   overlay.addEventListener("click", (e) => {
     if (e.target === overlay) overlay.classList.add("hidden");
