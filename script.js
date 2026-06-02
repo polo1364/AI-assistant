@@ -313,8 +313,11 @@ async function sendMessage() {
 
   addMessage("user", text);
   userInput.value = "";
+  resetInputHeight();
   sendBtn.disabled = true;
   sendBtn.textContent = "等待";
+
+  const typingEl = addTyping(useSearch ? "聯網搜尋並整理中" : "思考中");
 
   try {
     const response = await fetch("/api/ask", {
@@ -331,6 +334,7 @@ async function sendMessage() {
     });
 
     const data = await response.json();
+    typingEl.remove();
 
     if (!response.ok) {
       addMessage("ai", `發生錯誤：${data.error || response.status}${data.detail ? "\n" + JSON.stringify(data.detail) : ""}`);
@@ -346,12 +350,40 @@ async function sendMessage() {
       addMessage("ai", "沒有收到 Qwen 回覆，請檢查 API Key 或模型設定。");
     }
   } catch (error) {
+    typingEl.remove();
     addMessage("ai", "發生錯誤，請確認伺服器 (server.js) 是否有啟動。");
     console.error(error);
   }
 
   sendBtn.disabled = false;
   sendBtn.textContent = "送出";
+}
+
+/* ---------- 讀取動畫 ---------- */
+function addTyping(label) {
+  const div = document.createElement("div");
+  div.className = "message ai typing";
+  const span = document.createElement("span");
+  span.className = "typing-label";
+  span.textContent = label || "思考中";
+  const dots = document.createElement("span");
+  dots.className = "dots";
+  dots.innerHTML = "<span></span><span></span><span></span>";
+  div.appendChild(span);
+  div.appendChild(dots);
+  chatBox.appendChild(div);
+  chatBox.scrollTop = chatBox.scrollHeight;
+  return div;
+}
+
+/* ---------- 輸入框自動長高 ---------- */
+function autoGrowInput() {
+  userInput.style.height = "auto";
+  userInput.style.height = Math.min(userInput.scrollHeight, 220) + "px";
+}
+
+function resetInputHeight() {
+  userInput.style.height = "";
 }
 
 /* ---------- 事件綁定 ---------- */
@@ -369,6 +401,8 @@ searchToggle.addEventListener("change", () => {
   s.search = searchToggle.checked;
   localStorage.setItem(SETTINGS_KEY, JSON.stringify(s));
 });
+
+userInput.addEventListener("input", autoGrowInput);
 
 userInput.addEventListener("keydown", function (e) {
   if (e.key === "Enter" && !e.shiftKey) {
