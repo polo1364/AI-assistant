@@ -329,9 +329,25 @@ async function runAgentSearch({ userMessages, qwenKey, tavilyKey, model, baseUrl
     messages.push(assistantMessage);
   }
 
-  steps.push("已達工具呼叫上限，輸出目前結果");
+  steps.push("已達工具呼叫上限，停止繼續搜尋");
+  messages.push({
+    role: "user",
+    content:
+      "請停止呼叫工具，根據目前已取得的搜尋結果，直接產生最終回答。若資料不足，請明確說明不足之處。"
+  });
+  const finalWithoutTools = await callQwen({
+    baseUrl,
+    qwenKey,
+    model,
+    messages,
+    toolChoice: "none"
+  });
+  mergeUsage(aggregateUsage, finalWithoutTools.usage);
+  const finalMessage = finalWithoutTools.choices?.[0]?.message;
+  steps.push("Qwen 根據目前來源整理最終回答");
+
   return {
-    reply: stripInlineSources(assistantMessage?.content || "已完成搜尋，但 Qwen 沒有回傳最終內容。"),
+    reply: stripInlineSources(finalMessage?.content || "已完成搜尋，但 Qwen 沒有回傳最終內容。"),
     sources: dedupeSources(sources),
     usage: aggregateUsage,
     searchCount,
