@@ -6,7 +6,7 @@
   <title>蝦蝦 Agent 助理</title>
   <link rel="manifest" href="manifest.json" />
   <meta name="theme-color" content="#12091f" />
-  <link rel="stylesheet" href="style.css?v=agent-task-1" />
+  <link rel="stylesheet" href="style.css?v=agent-main-1" />
 </head>
 <body>
   <div class="app">
@@ -40,24 +40,43 @@
         </select>
       </label>
       <div class="toolbar-actions">
-        <button id="newChatBtn" class="chip-btn">新對話</button>
-        <button id="workAgentBtn" class="chip-btn">任務 Agent</button>
+        <button id="newChatBtn" class="chip-btn">清空任務</button>
         <button id="resourcesBtn" class="chip-btn">資源</button>
         <button id="templatesBtn" class="chip-btn">模板</button>
         <button id="historyBtn" class="chip-btn">歷史</button>
       </div>
     </div>
 
-    <main id="chatBox" class="chat-box">
-      <div class="message ai">
-        任務控制台已啟動。你可以輸入研究問題取得查證整理，或打開「任務 Agent」讓它先產生計畫、再讀檔分析、最後由你確認是否套用 diff。
-      </div>
+    <main class="agent-workspace">
+      <section class="task-panel">
+        <div class="agent-panel-head">
+          <div>
+            <div class="deck-badge">Agent Mission</div>
+            <h2>任務目標</h2>
+            <p>輸入你要 Agent 做的事，它會先產生計畫，再讀檔、分析、產生 diff，最後由你確認是否寫入。</p>
+          </div>
+        </div>
+        <label class="field">
+          <span>你要 Agent 做什麼？</span>
+          <textarea id="workGoal" class="modal-textarea task-goal-input" placeholder="例如：幫我優化 server.js 的 Tavily 搜尋策略，避免查不到資料，並保留官方與第三方來源。"></textarea>
+        </label>
+        <p class="hint">第一版只操作本專案檔案。Agent 會先產生計畫與 diff，必須按「確認寫入」才會修改檔案。</p>
+        <div id="workRuntimeBox" class="work-runtime">正在確認目前後端位置...</div>
+        <div class="agent-actions">
+          <button id="workPlanBtn" class="btn-secondary" type="button">產生計畫</button>
+          <button id="workExecuteBtn" class="btn-primary" type="button" disabled>同意執行</button>
+        </div>
+      </section>
+
+      <section id="workPlanBox" class="work-box hidden"></section>
+      <section id="workResultBox" class="work-box hidden"></section>
     </main>
 
-    <footer class="composer">
-      <textarea id="userInput" placeholder="輸入任務目標、研究問題，或貼上需要整理的資料..."></textarea>
-      <button id="sendBtn" onclick="sendMessage()">研究</button>
-    </footer>
+    <main id="chatBox" class="chat-box hidden">
+      <div class="message ai">
+        任務控制台已啟動。
+      </div>
+    </main>
   </div>
 
   <!-- 設定（雙 Key）模態視窗 -->
@@ -212,30 +231,6 @@
     </div>
   </div>
 
-  <!-- 半自動工作 Agent 模態視窗 -->
-  <div id="workAgentModal" class="modal-overlay hidden">
-    <div class="modal modal-wide">
-      <div class="modal-header">
-        <h2>半自動工作 Agent</h2>
-        <button class="close-btn" onclick="closeModal('workAgentModal')">×</button>
-      </div>
-      <div class="modal-body">
-        <label class="field">
-          <span>任務目標</span>
-          <textarea id="workGoal" class="modal-textarea" placeholder="例如：幫我優化 server.js 的 Tavily 搜尋策略，避免查不到資料，並保留官方與第三方來源。"></textarea>
-        </label>
-        <p class="hint">第一版只操作本專案檔案。Agent 會先產生計畫與 diff，必須按「確認寫入」才會修改檔案。</p>
-        <div id="workRuntimeBox" class="work-runtime">正在確認目前後端位置...</div>
-        <div id="workPlanBox" class="work-box hidden"></div>
-        <div id="workResultBox" class="work-box hidden"></div>
-      </div>
-      <div class="modal-footer">
-        <button id="workPlanBtn" class="btn-secondary" type="button">產生計畫</button>
-        <button id="workExecuteBtn" class="btn-primary" type="button" disabled>同意執行</button>
-      </div>
-    </div>
-  </div>
-
   <!-- Agent 學習資源模態視窗 -->
   <div id="resourcesModal" class="modal-overlay hidden">
     <div class="modal modal-wide">
@@ -255,6 +250,6 @@
 
   <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/dompurify@3.1.6/dist/purify.min.js"></script>
-  <script src="script.js?v=agent-task-1"></script>
+  <script src="script.js?v=agent-main-1"></script>
 </body>
 </html>

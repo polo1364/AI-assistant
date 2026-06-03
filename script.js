@@ -4,6 +4,15 @@ const sendBtn = document.getElementById("sendBtn");
 const searchModeSelect = document.getElementById("searchMode");
 const answerModeSelect = document.getElementById("answerMode");
 
+function byId(id) {
+  return document.getElementById(id);
+}
+
+function on(id, event, handler) {
+  const el = byId(id);
+  if (el) el.addEventListener(event, handler);
+}
+
 const SETTINGS_KEY = "qwen_assistant_settings";
 const USAGE_KEY = "qwen_assistant_usage";
 
@@ -479,12 +488,14 @@ function openModal(id) {
     renderTemplates();
   }
   if (id === "historyModal") renderHistory();
-  if (id === "workAgentModal") resetWorkAgentModal();
-  document.getElementById(id).classList.remove("hidden");
+  if (id === "workAgentModal") resetWorkAgentWorkspace();
+  const modal = document.getElementById(id);
+  if (modal) modal.classList.remove("hidden");
 }
 
 function closeModal(id) {
-  document.getElementById(id).classList.add("hidden");
+  const modal = document.getElementById(id);
+  if (modal) modal.classList.add("hidden");
 }
 
 function renderAgentResources() {
@@ -508,15 +519,17 @@ function renderAgentResources() {
   });
 }
 
-function resetWorkAgentModal() {
+function resetWorkAgentWorkspace({ clearGoal = false } = {}) {
   currentWorkPlan = null;
   currentWorkGoal = "";
   workRuntime = null;
-  document.getElementById("workPlanBox").classList.add("hidden");
-  document.getElementById("workResultBox").classList.add("hidden");
-  document.getElementById("workPlanBox").innerHTML = "";
-  document.getElementById("workResultBox").innerHTML = "";
-  document.getElementById("workExecuteBtn").disabled = true;
+  const goal = document.getElementById("workGoal");
+  if (clearGoal && goal) goal.value = "";
+  document.getElementById("workPlanBox")?.classList.add("hidden");
+  document.getElementById("workResultBox")?.classList.add("hidden");
+  if (document.getElementById("workPlanBox")) document.getElementById("workPlanBox").innerHTML = "";
+  if (document.getElementById("workResultBox")) document.getElementById("workResultBox").innerHTML = "";
+  if (document.getElementById("workExecuteBtn")) document.getElementById("workExecuteBtn").disabled = true;
   renderWorkRuntime(null);
   loadWorkRuntime();
 }
@@ -756,10 +769,12 @@ async function renderTemplates() {
     useBtn.className = "mini-btn primary";
     useBtn.textContent = "使用";
     useBtn.onclick = () => {
-      userInput.value = t.content;
+      const target = document.getElementById("workGoal") || userInput;
+      if (!target) return;
+      target.value = t.content;
       closeModal("templatesModal");
-      userInput.focus();
-      autoGrowInput();
+      target.focus();
+      autoGrowInput(target);
     };
 
     const editBtn = document.createElement("button");
@@ -1092,6 +1107,7 @@ function renderSources(sources) {
 }
 
 function addMessage(role, text, sources, steps, confidence) {
+  if (!chatBox) return;
   const div = document.createElement("div");
   div.className = `message ${role}`;
   const extra = sources && !Array.isArray(sources) && typeof sources === "object"
@@ -1149,6 +1165,8 @@ function getRecentMessages(nextUserText) {
 
 function resetConversation() {
   conversation = [];
+  resetWorkAgentWorkspace({ clearGoal: true });
+  if (!chatBox) return;
   chatBox.innerHTML = "";
   const div = document.createElement("div");
   div.className = "message ai";
@@ -1174,6 +1192,7 @@ function fallbackAgentSteps(searchMode, searchCount) {
 }
 
 async function sendMessage() {
+  if (!userInput || !sendBtn) return;
   const text = userInput.value.trim();
   if (!text) {
     alert("請先輸入內容");
@@ -1267,6 +1286,7 @@ async function sendMessage() {
 
 /* ---------- 讀取動畫 ---------- */
 function addTyping(label) {
+  if (!chatBox) return null;
   const div = document.createElement("div");
   div.className = "message ai typing";
   const span = document.createElement("span");
@@ -1283,61 +1303,74 @@ function addTyping(label) {
 }
 
 /* ---------- 輸入框自動長高 ---------- */
-function autoGrowInput() {
-  userInput.style.height = "auto";
-  userInput.style.height = Math.min(userInput.scrollHeight, 220) + "px";
+function autoGrowInput(input = userInput) {
+  if (!input) return;
+  input.style.height = "auto";
+  input.style.height = Math.min(input.scrollHeight, 220) + "px";
 }
 
 function resetInputHeight() {
-  userInput.style.height = "";
+  if (userInput) userInput.style.height = "";
 }
 
 /* ---------- 事件綁定 ---------- */
-document.getElementById("settingsBtn").onclick = () => openModal("settingsModal");
-document.getElementById("usageBtn").onclick = () => openModal("usageModal");
-document.getElementById("workAgentBtn").onclick = () => openModal("workAgentModal");
-document.getElementById("resourcesBtn").onclick = () => openModal("resourcesModal");
-document.getElementById("templatesBtn").onclick = () => openModal("templatesModal");
-document.getElementById("historyBtn").onclick = () => openModal("historyModal");
-document.getElementById("newChatBtn").onclick = resetConversation;
-document.getElementById("workPlanBtn").onclick = createWorkPlan;
-document.getElementById("workExecuteBtn").onclick = executeWorkPlan;
+if (document.getElementById("settingsBtn")) document.getElementById("settingsBtn").onclick = () => openModal("settingsModal");
+if (document.getElementById("usageBtn")) document.getElementById("usageBtn").onclick = () => openModal("usageModal");
+if (document.getElementById("resourcesBtn")) document.getElementById("resourcesBtn").onclick = () => openModal("resourcesModal");
+if (document.getElementById("templatesBtn")) document.getElementById("templatesBtn").onclick = () => openModal("templatesModal");
+if (document.getElementById("historyBtn")) document.getElementById("historyBtn").onclick = () => openModal("historyModal");
+if (document.getElementById("newChatBtn")) document.getElementById("newChatBtn").onclick = resetConversation;
+if (document.getElementById("workPlanBtn")) document.getElementById("workPlanBtn").onclick = createWorkPlan;
+if (document.getElementById("workExecuteBtn")) document.getElementById("workExecuteBtn").onclick = executeWorkPlan;
 
-["settingsModal", "usageModal", "templatesModal", "historyModal", "workAgentModal", "resourcesModal"].forEach((id) => {
+["settingsModal", "usageModal", "templatesModal", "historyModal", "resourcesModal"].forEach((id) => {
   const overlay = document.getElementById(id);
+  if (!overlay) return;
   overlay.addEventListener("click", (e) => {
     if (e.target === overlay) overlay.classList.add("hidden");
   });
 });
 
-searchModeSelect.addEventListener("change", () => {
+if (searchModeSelect) searchModeSelect.addEventListener("change", () => {
   const s = getSettings();
   s.searchMode = searchModeSelect.value;
   localStorage.setItem(SETTINGS_KEY, JSON.stringify(s));
 });
 
-answerModeSelect.addEventListener("change", () => {
+if (answerModeSelect) answerModeSelect.addEventListener("change", () => {
   const s = getSettings();
   s.answerMode = answerModeSelect.value;
   localStorage.setItem(SETTINGS_KEY, JSON.stringify(s));
 });
 
-userInput.addEventListener("input", autoGrowInput);
+if (userInput) userInput.addEventListener("input", () => autoGrowInput(userInput));
 
-userInput.addEventListener("keydown", function (e) {
+if (userInput) userInput.addEventListener("keydown", function (e) {
   if (e.key === "Enter" && !e.shiftKey) {
     e.preventDefault();
     sendMessage();
   }
 });
 
+const workGoalInput = document.getElementById("workGoal");
+if (workGoalInput) {
+  workGoalInput.addEventListener("input", () => autoGrowInput(workGoalInput));
+  workGoalInput.addEventListener("keydown", function (e) {
+    if ((e.ctrlKey || e.metaKey) && e.key === "Enter") {
+      e.preventDefault();
+      createWorkPlan();
+    }
+  });
+}
+
 /* ---------- 初始化 ---------- */
 (async function init() {
   const s = getSettings();
-  searchModeSelect.value = s.searchMode || (s.search ? "force" : "auto");
-  answerModeSelect.value = s.answerMode || "verified";
+  if (searchModeSelect) searchModeSelect.value = s.searchMode || (s.search ? "force" : "auto");
+  if (answerModeSelect) answerModeSelect.value = s.answerMode || "verified";
   loadUsage();
   renderUsage();
+  resetWorkAgentWorkspace();
   try {
     await seedTemplatesIfNeeded();
   } catch (e) {
