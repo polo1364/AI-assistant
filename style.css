@@ -875,7 +875,8 @@ textarea:focus {
   overflow-y: auto;
 }
 
-.task-panel {
+.task-panel,
+.agent-card {
   padding: 16px;
   border: 1px solid rgba(96, 165, 250, 0.35);
   border-radius: 18px;
@@ -884,6 +885,19 @@ textarea:focus {
     rgba(15, 23, 42, 0.72);
   color: #e5e7eb;
   box-shadow: 0 18px 45px rgba(2, 6, 23, 0.24);
+}
+
+.badge {
+  display: inline-block;
+  padding: 4px 10px;
+  margin-bottom: 12px;
+  border-radius: 999px;
+  border: 1px solid rgba(250, 204, 21, 0.5);
+  color: #fde68a;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 1px;
+  text-transform: uppercase;
 }
 
 .agent-panel-head {
@@ -946,6 +960,12 @@ textarea:focus {
   display: flex;
   gap: 10px;
   margin-top: 12px;
+}
+
+.agent-section {
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px dashed rgba(148, 163, 184, 0.3);
 }
 
 .agent-workspace .work-box {
@@ -1029,6 +1049,38 @@ textarea:focus {
   max-height: 320px;
   overflow: auto;
   white-space: pre;
+}
+
+.sources {
+  display: grid;
+  gap: 10px;
+}
+
+.source-card {
+  display: block;
+  padding: 12px;
+  border-radius: 12px;
+  text-decoration: none;
+  background: rgba(2, 6, 23, 0.65);
+  border: 1px solid rgba(96, 165, 250, 0.28);
+  color: #dbeafe;
+}
+
+.source-meta {
+  color: #67e8f9;
+  font-size: 12px;
+  margin-bottom: 4px;
+}
+
+.source-name {
+  font-weight: 800;
+  margin-bottom: 4px;
+}
+
+.source-url {
+  color: #94a3b8;
+  font-size: 12px;
+  word-break: break-all;
 }
 
 .confirm-write-btn.written {

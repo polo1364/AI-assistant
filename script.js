@@ -13,6 +13,30 @@ function on(id, event, handler) {
   if (el) el.addEventListener(event, handler);
 }
 
+function goalEl() {
+  return document.getElementById("goalInput") || document.getElementById("workGoal");
+}
+
+function planBoxEl() {
+  return document.getElementById("planBox") || document.getElementById("workPlanBox");
+}
+
+function resultBoxEl() {
+  return document.getElementById("resultBox") || document.getElementById("workResultBox");
+}
+
+function writeResultBoxEl() {
+  return document.getElementById("writeResultBox");
+}
+
+function planButtonEl() {
+  return document.getElementById("planBtn") || document.getElementById("workPlanBtn");
+}
+
+function executeButtonEl() {
+  return document.getElementById("executeBtn") || document.getElementById("workExecuteBtn");
+}
+
 const SETTINGS_KEY = "qwen_assistant_settings";
 const USAGE_KEY = "qwen_assistant_usage";
 
@@ -523,13 +547,15 @@ function resetWorkAgentWorkspace({ clearGoal = false } = {}) {
   currentWorkPlan = null;
   currentWorkGoal = "";
   workRuntime = null;
-  const goal = document.getElementById("workGoal");
+  const goal = goalEl();
   if (clearGoal && goal) goal.value = "";
-  document.getElementById("workPlanBox")?.classList.add("hidden");
-  document.getElementById("workResultBox")?.classList.add("hidden");
-  if (document.getElementById("workPlanBox")) document.getElementById("workPlanBox").innerHTML = "";
-  if (document.getElementById("workResultBox")) document.getElementById("workResultBox").innerHTML = "";
-  if (document.getElementById("workExecuteBtn")) document.getElementById("workExecuteBtn").disabled = true;
+  planBoxEl()?.classList.add("hidden");
+  resultBoxEl()?.classList.add("hidden");
+  writeResultBoxEl()?.classList.add("hidden");
+  if (planBoxEl()) planBoxEl().innerHTML = "";
+  if (resultBoxEl()) resultBoxEl().innerHTML = "";
+  if (writeResultBoxEl()) writeResultBoxEl().innerHTML = "";
+  if (executeButtonEl()) executeButtonEl().disabled = true;
   renderWorkRuntime(null);
   loadWorkRuntime();
 }
@@ -636,26 +662,39 @@ async function loadWorkRuntime() {
 }
 
 function renderWorkPlan(plan) {
-  const box = document.getElementById("workPlanBox");
+  const box = planBoxEl();
+  if (!box) return;
   const steps = (plan.steps || []).map((step, index) => {
     const pathText = step.path ? ` <code>${escapeHtml(String(step.path))}</code>` : "";
     return `<li><strong>${escapeHtml(step.tool)}</strong>${pathText}<br><span>${escapeHtml(step.reason || "")}</span></li>`;
   }).join("");
 
   box.innerHTML = `
-    <h3>任務計畫</h3>
-    <div class="work-meta">工作區：${escapeHtml(plan.workspace?.type || getWorkspacePayload().type)} / 風險：${escapeHtml(plan.riskLevel || "medium")} / 需要確認：${plan.requiresUserConfirmation ? "是" : "否"}</div>
-    <ol class="work-steps">${steps}</ol>
+    <div class="badge">AGENT PLAN</div>
+    <h3>Agent 任務計畫</h3>
+    <div class="agent-section">
+      <div class="label">目標</div>
+      <div>${escapeHtml(plan.goal || currentWorkGoal || "")}</div>
+    </div>
+    <div class="agent-section">
+      <div class="label">工作區 / 風險</div>
+      <div>${escapeHtml(plan.workspace?.type || getWorkspacePayload().type)} / ${escapeHtml(plan.riskLevel || "medium")} / 需要確認：${plan.requiresUserConfirmation ? "是" : "否"}</div>
+    </div>
+    <div class="agent-section">
+      <div class="label">執行步驟</div>
+      <ol class="work-steps">${steps}</ol>
+    </div>
   `;
   box.classList.remove("hidden");
-  document.getElementById("workExecuteBtn").disabled = false;
+  if (executeButtonEl()) executeButtonEl().disabled = false;
 }
 
 function renderWorkResult(data) {
-  const box = document.getElementById("workResultBox");
+  const box = resultBoxEl();
+  if (!box) return;
   const readFiles = (data.readFiles || []).map((file) => `<li>${escapeHtml(file.path)} (${file.size} chars)</li>`).join("");
+  const steps = (data.steps || []).map((step) => `<li>${escapeHtml(step)}</li>`).join("");
   const notes = (data.notes || []).map((note) => `<li>${escapeHtml(note)}</li>`).join("");
-  const sources = (data.sources || []).map((src) => `<li>${src.official ? "官方" : "第三方"}｜<a href="${escapeHtml(src.url)}" target="_blank" rel="noopener noreferrer">${escapeHtml(src.title || src.url)}</a></li>`).join("");
   const patches = (data.patches || []).map((patch) => `
     <div class="patch-card">
       <div class="patch-title">${escapeHtml(patch.repo ? `${patch.repo}:${patch.path}` : patch.path)}</div>
@@ -669,12 +708,20 @@ function renderWorkResult(data) {
     : escapeHtml(data.summary || "已完成執行。");
 
   box.innerHTML = `
+    <div class="badge">AGENT RESULT</div>
     <h3>執行結果</h3>
-    <div class="ai-content">${summaryHtml}</div>
-    ${readFiles ? `<h4>已讀取檔案</h4><ul>${readFiles}</ul>` : ""}
-    ${sources ? `<h4>查證來源</h4><ul>${sources}</ul>` : ""}
-    ${notes ? `<h4>備註</h4><ul>${notes}</ul>` : ""}
-    ${patches ? `<h4>待確認 diff</h4><p class="hint">請確認差異內容正確後再按按鈕。不按就不會修改檔案或建立 PR。</p>${patches}` : `<p>${data.workspace?.type === "web" ? "網路查證模式不會產生檔案修改。" : "沒有產生需要寫入的 diff。"}</p>`}
+    <div class="agent-section">
+      <div class="label">摘要</div>
+      <div class="ai-content">${summaryHtml}</div>
+    </div>
+    ${steps ? `<div class="agent-section"><div class="label">執行紀錄</div><ul>${steps}</ul></div>` : ""}
+    ${readFiles ? `<div class="agent-section"><div class="label">已讀取檔案</div><ul>${readFiles}</ul></div>` : ""}
+    ${renderSourcesBlock(data.sources || [])}
+    ${notes ? `<div class="agent-section"><div class="label">注意事項</div><ul>${notes}</ul></div>` : ""}
+    <div class="agent-section">
+      <div class="label">建議修改</div>
+      ${patches ? `<p class="hint">請確認差異內容正確後再按按鈕。不按就不會修改檔案或建立 PR。</p>${patches}` : `<p>${data.workspace?.type === "web" ? "網路查證模式不會產生檔案修改。" : "沒有產生需要寫入的 diff。"}</p>`}
+    </div>
   `;
   box.classList.remove("hidden");
 
@@ -683,8 +730,80 @@ function renderWorkResult(data) {
   });
 }
 
+function renderSourcesBlock(sources) {
+  if (!Array.isArray(sources) || sources.length === 0) return "";
+
+  return `
+    <div class="agent-section">
+      <div class="label">來源</div>
+      <div class="sources">
+        ${sources.map((source, index) => `
+          <a class="source-card" href="${escapeHtml(source.url || "#")}" target="_blank" rel="noopener noreferrer">
+            <div class="source-meta">${index + 1}. ${source.official ? "官方來源" : "第三方來源"}</div>
+            <div class="source-name">${escapeHtml(source.title || "未命名來源")}</div>
+            <div class="source-url">${escapeHtml(source.url || "")}</div>
+          </a>
+        `).join("")}
+      </div>
+    </div>
+  `;
+}
+
+function renderWriteResult(data) {
+  const box = writeResultBoxEl();
+  if (!box) return;
+
+  const prInfo = data.pullRequest
+    ? `
+      <div class="agent-section">
+        <div class="label">Pull Request</div>
+        <a href="${escapeHtml(data.pullRequest.url || "")}" target="_blank" rel="noopener noreferrer">
+          #${escapeHtml(String(data.pullRequest.number || ""))} ${escapeHtml(data.pullRequest.title || "")}
+        </a>
+      </div>
+    `
+    : "";
+  const writeTime = data.lastWriteTime ? new Date(data.lastWriteTime).toLocaleString() : "";
+  const hashInfo = data.writtenHash ? `${String(data.writtenHash).slice(0, 12)}...` : "未驗證或不適用";
+
+  box.innerHTML = `
+    <div class="badge">DONE</div>
+    <h3>任務完成</h3>
+    <p>${escapeHtml(data.message || "已完成。")}</p>
+    <div class="agent-section">
+      <div class="label">類型</div>
+      <div>${escapeHtml(data.type || "local")}</div>
+    </div>
+    <div class="agent-section">
+      <div class="label">檔案</div>
+      <div>${escapeHtml(data.path || "")}</div>
+    </div>
+    <div class="agent-section">
+      <div class="label">驗證</div>
+      <div>${data.verified ? `Hash 驗證成功：${escapeHtml(hashInfo)}` : "未驗證或不適用"}</div>
+    </div>
+    ${writeTime ? `<div class="agent-section"><div class="label">修改時間</div><div>${escapeHtml(writeTime)}</div></div>` : ""}
+    ${data.absolutePath ? `<div class="agent-section"><div class="label">實際路徑</div><div>${escapeHtml(data.absolutePath)}</div></div>` : ""}
+    ${prInfo}
+    <div class="agent-section">
+      <div class="label">提醒</div>
+      <div>local 模式會修改 server 所在環境；GitHub 模式會建立分支與 PR；web 模式不會修改檔案。</div>
+    </div>
+  `;
+  box.classList.remove("hidden");
+}
+
+function renderPlan(data) {
+  renderWorkPlan(data.plan || data);
+}
+
+function renderExecutionResult(data) {
+  currentExecution = data;
+  renderWorkResult(data);
+}
+
 async function createWorkPlan() {
-  const goal = document.getElementById("workGoal").value.trim();
+  const goal = goalEl()?.value.trim() || "";
   if (!goal) {
     alert("請先輸入任務目標。");
     return;
@@ -697,8 +816,10 @@ async function createWorkPlan() {
   }
 
   currentWorkGoal = goal;
-  document.getElementById("workPlanBtn").disabled = true;
-  document.getElementById("workPlanBtn").textContent = "規劃中";
+  if (planButtonEl()) {
+    planButtonEl().disabled = true;
+    planButtonEl().textContent = "規劃中";
+  }
 
   try {
     const response = await fetch("/api/plan", {
@@ -714,8 +835,10 @@ async function createWorkPlan() {
   } catch (error) {
     alert(error.message || "產生計畫失敗。");
   } finally {
-    document.getElementById("workPlanBtn").disabled = false;
-    document.getElementById("workPlanBtn").textContent = "產生計畫";
+    if (planButtonEl()) {
+      planButtonEl().disabled = false;
+      planButtonEl().textContent = "產生計畫";
+    }
   }
 }
 
@@ -727,8 +850,10 @@ async function executeWorkPlan() {
 
   const settings = getSettings();
   const workspace = getWorkspacePayload();
-  document.getElementById("workExecuteBtn").disabled = true;
-  document.getElementById("workExecuteBtn").textContent = "執行中";
+  if (executeButtonEl()) {
+    executeButtonEl().disabled = true;
+    executeButtonEl().textContent = "執行中";
+  }
 
   try {
     const response = await fetch("/api/execute", {
@@ -750,8 +875,10 @@ async function executeWorkPlan() {
   } catch (error) {
     alert(error.message || "執行計畫失敗。");
   } finally {
-    document.getElementById("workExecuteBtn").disabled = false;
-    document.getElementById("workExecuteBtn").textContent = "同意執行";
+    if (executeButtonEl()) {
+      executeButtonEl().disabled = false;
+      executeButtonEl().textContent = "同意執行";
+    }
   }
 }
 
@@ -784,6 +911,7 @@ async function confirmWorkWrite(token, button) {
     button.textContent = data.type === "github" ? "已建立 PR" : "已寫入";
     button.classList.add("written");
     status.classList.add("success");
+    renderWriteResult(data);
     if (data.type === "github") {
       status.innerHTML = `已建立 PR：<a href="${escapeHtml(data.pullRequest?.url || "")}" target="_blank" rel="noopener noreferrer">${escapeHtml(data.pullRequest?.title || data.pullRequest?.url || "Pull Request")}</a>`;
       addMessage("ai", `GitHub PR 已建立：${data.pullRequest?.url || ""}`);
@@ -803,6 +931,18 @@ async function confirmWorkWrite(token, button) {
     status.textContent = error.message || "寫入失敗。";
     alert(error.message || "寫入失敗。");
   }
+}
+
+async function createPlan() {
+  return createWorkPlan();
+}
+
+async function executePlan() {
+  return executeWorkPlan();
+}
+
+async function confirmWrite(token) {
+  return confirmWorkWrite(token);
 }
 
 /* ---------- 自訂查詢模板 ---------- */
@@ -849,7 +989,7 @@ async function renderTemplates() {
     useBtn.className = "mini-btn primary";
     useBtn.textContent = "使用";
     useBtn.onclick = () => {
-      const target = document.getElementById("workGoal") || userInput;
+      const target = goalEl() || userInput;
       if (!target) return;
       target.value = t.content;
       closeModal("templatesModal");
@@ -1400,8 +1540,8 @@ if (document.getElementById("resourcesBtn")) document.getElementById("resourcesB
 if (document.getElementById("templatesBtn")) document.getElementById("templatesBtn").onclick = () => openModal("templatesModal");
 if (document.getElementById("historyBtn")) document.getElementById("historyBtn").onclick = () => openModal("historyModal");
 if (document.getElementById("newChatBtn")) document.getElementById("newChatBtn").onclick = resetConversation;
-if (document.getElementById("workPlanBtn")) document.getElementById("workPlanBtn").onclick = createWorkPlan;
-if (document.getElementById("workExecuteBtn")) document.getElementById("workExecuteBtn").onclick = executeWorkPlan;
+if (planButtonEl()) planButtonEl().onclick = createWorkPlan;
+if (executeButtonEl()) executeButtonEl().onclick = executeWorkPlan;
 
 ["settingsModal", "usageModal", "templatesModal", "historyModal", "resourcesModal"].forEach((id) => {
   const overlay = document.getElementById(id);
@@ -1432,7 +1572,7 @@ if (userInput) userInput.addEventListener("keydown", function (e) {
   }
 });
 
-const workGoalInput = document.getElementById("workGoal");
+const workGoalInput = goalEl();
 if (workGoalInput) {
   workGoalInput.addEventListener("input", () => autoGrowInput(workGoalInput));
   workGoalInput.addEventListener("keydown", function (e) {
