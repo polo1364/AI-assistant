@@ -372,6 +372,36 @@ const OFFICIAL_DOMAINS = {
     "openai.com",
     "platform.openai.com",
     "help.openai.com"
+  ],
+  google: [
+    "ai.google.dev",
+    "cloud.google.com",
+    "developers.google.com",
+    "blog.google"
+  ],
+  deepseek: [
+    "deepseek.com",
+    "api-docs.deepseek.com"
+  ],
+  replicate: [
+    "replicate.com"
+  ],
+  fal: [
+    "fal.ai",
+    "docs.fal.ai"
+  ],
+  stability: [
+    "stability.ai",
+    "platform.stability.ai"
+  ],
+  github: [
+    "github.com"
+  ],
+  npm: [
+    "npmjs.com"
+  ],
+  mdn: [
+    "developer.mozilla.org"
   ]
 };
 
@@ -390,6 +420,14 @@ function classifySearch(query) {
   if (/openai|chatgpt|gpt-|gpt4|gpt-4|gpt5|gpt-5|api pricing|pricing|計費|費用|價格/.test(q)) {
     profiles.push("openai");
   }
+  if (/google|gemini|ai studio|google ai|vertex/i.test(q)) profiles.push("google");
+  if (/deepseek/i.test(q)) profiles.push("deepseek");
+  if (/replicate/i.test(q)) profiles.push("replicate");
+  if (/fal\.ai|fal ai|fal/i.test(q)) profiles.push("fal");
+  if (/stability|stable diffusion|sdxl|sd3/i.test(q)) profiles.push("stability");
+  if (/github|repo|repository/i.test(q)) profiles.push("github");
+  if (/npm|package/i.test(q)) profiles.push("npm");
+  if (/mdn|html|css|javascript|web api/i.test(q)) profiles.push("mdn");
 
   const domains = [...new Set(profiles.flatMap((p) => OFFICIAL_DOMAINS[p] || []))];
   const officialPreferred = domains.length > 0;
@@ -404,26 +442,14 @@ function classifySearch(query) {
   };
 }
 
-async function tavilySearch(query, tavilyKey) {
-  const profile = classifySearch(query);
-  const searchBody = {
-    query: profile.query,
-    search_depth: "basic",
-    max_results: 3,
-    include_answer: true
-  };
-
-  if (profile.officialPreferred) {
-    searchBody.include_domains = profile.domains;
-  }
-
+async function tavilySearchRequest(body, tavilyKey) {
   const resp = await fetch("https://api.tavily.com/search", {
     method: "POST",
     headers: {
       Authorization: `Bearer ${tavilyKey}`,
       "Content-Type": "application/json"
     },
-    body: JSON.stringify(searchBody)
+    body: JSON.stringify(body)
   });
 
   const data = await resp.json();
@@ -433,30 +459,86 @@ async function tavilySearch(query, tavilyKey) {
     err.status = resp.status;
     throw err;
   }
-  if (profile.officialPreferred && (!Array.isArray(data.results) || data.results.length === 0)) {
-    return tavilySearchWithoutDomainLimit(query, tavilyKey);
-  }
   return data;
 }
 
-async function tavilySearchWithoutDomainLimit(query, tavilyKey) {
-  const resp = await fetch("https://api.tavily.com/search", {
+async function smartSearch(query, tavilyKey, options = {}) {
+  const maxResults = options.maxResults || 6;
+  const searchDepth = options.searchDepth || "basic";
+  const profile = classifySearch(query);
+  const searchBodies = [];
+
+  if (profile.officialPreferred) {
+    searchBodies.push({
+      query: profile.query,
+      search_depth: searchDepth,
+      max_results: maxResults,
+      include_answer: true,
+      include_domains: profile.domains
+    });
+  }
+
+  searchBodies.push({
+    query: `${query} official documentation`,
+    search_depth: searchDepth,
+    max_results: maxResults,
+    include_answer: true
+  });
+  searchBodies.push({
+    query,
+    search_depth: searchDepth,
+    max_results: maxResults,
+    include_answer: true
+  });
+
+  let answer = "";
+  const allResults = [];
+  for (const body of searchBodies) {
+    const data = await tavilySearchRequest(body, tavilyKey);
+    if (data.answer && !answer) answer = data.answer;
+    if (Array.isArray(data.results)) allResults.push(...data.results);
+
+    const uniqueCount = new Set(allResults.map((r) => r?.url).filter(Boolean)).size;
+    const officialCount = allResults.filter((r) => isOfficialSource(r?.url)).length;
+    if (officialCount >= 2 || uniqueCount >= maxResults) break;
+  }
+
+  const seen = new Set();
+  const results = allResults
+    .filter((r) => {
+      if (!r || !r.url || seen.has(r.url)) return false;
+      seen.add(r.url);
+      return true;
+    })
+    .sort((a, b) => Number(isOfficialSource(b.url)) - Number(isOfficialSource(a.url)))
+    .slice(0, maxResults);
+
+  return { answer, results };
+}
+
+async function tavilySearch(query, tavilyKey, options = {}) {
+  return smartSearch(query, tavilyKey, options);
+}
+
+async function tavilyExtract(urls, tavilyKey) {
+  const cleanUrls = [...new Set((urls || []).filter(Boolean))].slice(0, 3);
+  if (cleanUrls.length === 0) return { results: [] };
+
+  const resp = await fetch("https://api.tavily.com/extract", {
     method: "POST",
     headers: {
       Authorization: `Bearer ${tavilyKey}`,
       "Content-Type": "application/json"
     },
     body: JSON.stringify({
-      query: `${query} official documentation`,
-      search_depth: "basic",
-      max_results: 3,
-      include_answer: true
+      urls: cleanUrls,
+      extract_depth: "basic"
     })
   });
 
   const data = await resp.json();
   if (!resp.ok) {
-    const err = new Error("Tavily 搜尋失敗");
+    const err = new Error("Tavily 擷取網頁內容失敗");
     err.detail = data;
     err.status = resp.status;
     throw err;
@@ -475,27 +557,45 @@ function isOfficialSource(url) {
   }
 }
 
-function buildSearchContext(tavilyData) {
-  let results = (Array.isArray(tavilyData.results) ? tavilyData.results : []).sort((a, b) => {
-    return Number(isOfficialSource(b.url)) - Number(isOfficialSource(a.url));
+function buildSearchContext(tavilyData, extractData = null) {
+  const rawResults = Array.isArray(tavilyData.results) ? tavilyData.results : [];
+  const officialResults = rawResults.filter((r) => isOfficialSource(r.url));
+  const thirdPartyResults = rawResults.filter((r) => !isOfficialSource(r.url));
+  const results = [...officialResults, ...thirdPartyResults].slice(0, 6);
+  const extractMap = new Map();
+  const extractResults = Array.isArray(extractData?.results) ? extractData.results : [];
+  extractResults.forEach((item) => {
+    if (item?.url) extractMap.set(item.url, item.raw_content || item.content || "");
   });
-  const officialResults = results.filter((r) => isOfficialSource(r.url));
-  if (officialResults.length > 0) {
-    results = officialResults;
-  }
   const sources = results.map((r) => ({ title: r.title, url: r.url, official: isOfficialSource(r.url) }));
 
   let context = "";
   if (tavilyData.answer) {
     context += `搜尋摘要（僅供參考，若與官方來源衝突請忽略）：${tavilyData.answer}\n\n`;
   }
-  context += "搜尋結果（若已篩選到官方來源，下列內容只包含官方來源）：\n";
+  context += "搜尋結果（官方來源優先，第三方來源只作補充）：\n";
   results.forEach((r, i) => {
     const sourceType = isOfficialSource(r.url) ? "官方來源" : "第三方來源";
-    context += `[${i + 1}] ${sourceType}\n標題：${r.title}\n網址：${r.url}\n內容：${r.content}\n\n`;
+    const extracted = extractMap.get(r.url);
+    const content = extracted ? `${String(extracted).slice(0, 2500)}\n（以上為 Tavily Extract 正文節錄）` : r.content;
+    context += `[${i + 1}] ${sourceType}\n標題：${r.title}\n網址：${r.url}\n內容：${content}\n\n`;
   });
 
   return { context, sources };
+}
+
+async function extractForSearchResults(tavilyData, tavilyKey) {
+  const results = Array.isArray(tavilyData.results) ? tavilyData.results : [];
+  const urls = results
+    .slice()
+    .sort((a, b) => Number(isOfficialSource(b.url)) - Number(isOfficialSource(a.url)))
+    .slice(0, 3)
+    .map((r) => r.url);
+  try {
+    return await tavilyExtract(urls, tavilyKey);
+  } catch (error) {
+    return { results: [], error: error.message };
+  }
 }
 
 function normalizeMessages(message, messages) {
@@ -791,6 +891,8 @@ async function createAgentPlan({ userMessages, qwenKey, model, baseUrl, searchMo
     "根據使用者問題決定 taskType、是否需要搜尋、最多 3 個搜尋 query、回答格式，以及是否必須使用本專案事實。\n" +
     "taskType 只能是 project、official_qwen、official_tavily、official_railway、official_openai、general_write、coding、research、unknown。\n" +
     "若問題涉及官方 API、部署、價格、限制、最新資訊或第三方服務狀態，needsSearch 應為 true。\n" +
+    "若問題涉及 API 能力、模型是否支援、圖片生成、價格或限制，queries 必須從不同角度產生，例如：official docs、models documentation、pricing/limits、specific feature availability。\n" +
+    "query 請用英文關鍵字搭配 official docs，以提高官方文件命中率；不要只重複使用者原句。\n" +
     "本專案事實：\n" + projectFactsText() + "\n\n" +
     "輸出格式：{\"taskType\":\"...\",\"needsSearch\":true,\"queries\":[\"...\"],\"answerFormat\":\"conclusion_basis_risks_next_steps|natural\",\"mustUseProjectFacts\":true}\n\n" +
     `使用者問題：${latest}`;
@@ -829,7 +931,8 @@ async function executePlannedSearch({ plan, userMessages, qwenKey, tavilyKey, mo
   for (const query of plan.queries.slice(0, 3)) {
     steps.push(`Tavily 搜尋：${query}`);
     const data = await tavilySearch(query, tavilyKey);
-    const built = buildSearchContext(data);
+    const extractData = await extractForSearchResults(data, tavilyKey);
+    const built = buildSearchContext(data, extractData);
     contexts.push(`查詢：${query}\n${built.context}`);
     allSources.push(...built.sources);
     searchCount += 1;
@@ -980,7 +1083,8 @@ async function runForceSearch({ userMessages, qwenKey, tavilyKey, model, baseUrl
     "將搜尋結果交給 Qwen 整理回答"
   ];
   const tavilyData = await tavilySearch(latestUser, tavilyKey);
-  const built = buildSearchContext(tavilyData);
+  const extractData = await extractForSearchResults(tavilyData, tavilyKey);
+  const built = buildSearchContext(tavilyData, extractData);
   const qwenData = await callQwen({
     baseUrl,
     qwenKey,
@@ -1096,7 +1200,8 @@ async function runAgentSearch({ userMessages, qwenKey, tavilyKey, model, baseUrl
       const query = args.query || userMessages[userMessages.length - 1]?.content || "";
       steps.push(`Tavily 搜尋：${query}`);
       const tavilyData = await tavilySearch(query, tavilyKey);
-      const built = buildSearchContext(tavilyData);
+      const extractData = await extractForSearchResults(tavilyData, tavilyKey);
+      const built = buildSearchContext(tavilyData, extractData);
       sources.push(...built.sources);
       searchCount += 1;
       steps.push(`取得 ${built.sources.length} 個來源，優先保留官方來源`);

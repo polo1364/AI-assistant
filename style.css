@@ -487,6 +487,43 @@ body {
   word-break: break-all;
 }
 
+.source-card {
+  padding: 9px 10px;
+  border: 1px solid rgba(34, 211, 238, 0.18);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.035);
+}
+
+.source-card strong,
+.source-card small {
+  display: block;
+}
+
+.source-card small {
+  margin-top: 3px;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.source-badge {
+  display: inline-flex;
+  margin-bottom: 5px;
+  padding: 2px 7px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.source-badge.official {
+  background: rgba(16, 185, 129, 0.14);
+  color: #bbf7d0;
+}
+
+.source-badge.third-party {
+  background: rgba(251, 191, 36, 0.13);
+  color: #fde68a;
+}
+
 .sources a:hover {
   text-decoration: underline;
 }

@@ -860,10 +860,20 @@ function addMessage(role, text, sources, steps, confidence) {
       sources.forEach((src) => {
         if (!src || !src.url) return;
         const a = document.createElement("a");
+        a.className = "source-card";
         a.href = src.url;
         a.target = "_blank";
         a.rel = "noopener noreferrer";
-        a.textContent = src.title ? `${src.title} — ${src.url}` : src.url;
+        const badge = document.createElement("span");
+        badge.className = `source-badge ${src.official ? "official" : "third-party"}`;
+        badge.textContent = src.official ? "官方" : "第三方";
+        const name = document.createElement("strong");
+        name.textContent = src.title || "未命名來源";
+        const url = document.createElement("small");
+        url.textContent = src.url;
+        a.appendChild(badge);
+        a.appendChild(name);
+        a.appendChild(url);
         box.appendChild(a);
       });
       div.appendChild(box);
