@@ -705,7 +705,12 @@ async function renderHistory() {
     loadBtn.textContent = "載入";
     loadBtn.onclick = () => {
       addMessage("user", r.question);
-      addMessage("ai", r.reply, r.sources, r.steps, r.confidence);
+      addMessage("ai", r.reply, {
+        sources: r.sources || [],
+        steps: r.steps || [],
+        confidence: r.confidence || null,
+        thinkingSummary: r.thinkingSummary || null
+      });
       closeModal("historyModal");
     };
 
@@ -836,63 +841,113 @@ function renderMarkdown(md) {
   return html;
 }
 
+function renderThinkingSummary(summary) {
+  const box = document.createElement("div");
+  if (!summary) return box;
+
+  const steps = Array.isArray(summary.steps) ? summary.steps : [];
+  box.className = "thinking-card";
+  box.innerHTML = `
+    <div class="thinking-header">
+      <span class="thinking-dot"></span>
+      <span>AI 思考摘要</span>
+    </div>
+    <div class="thinking-grid">
+      <div>
+        <div class="thinking-label">模式</div>
+        <div class="thinking-value">${escapeHtml(summary.mode || "一般模式")}</div>
+      </div>
+      <div>
+        <div class="thinking-label">查證</div>
+        <div class="thinking-value">${escapeHtml(summary.search || "未啟用")}</div>
+      </div>
+      <div>
+        <div class="thinking-label">可信度</div>
+        <div class="thinking-value">${escapeHtml(summary.confidence || "中")}</div>
+      </div>
+    </div>
+    <div class="thinking-source">${escapeHtml(summary.sourceSummary || "")}</div>
+    ${
+      steps.length
+        ? `<details class="thinking-steps">
+            <summary>查看查證流程</summary>
+            <ol>${steps.map((s) => `<li>${escapeHtml(s)}</li>`).join("")}</ol>
+          </details>`
+        : ""
+    }
+  `;
+  return box;
+}
+
+function renderConfidence(confidence) {
+  const box = document.createElement("div");
+  if (!confidence) return box;
+
+  box.className = `confidence confidence-${confidence.level || "medium"}`;
+  box.innerHTML = `
+    <div class="confidence-title">可信度：${escapeHtml(confidence.label || "中")}</div>
+    <div class="confidence-reason">${escapeHtml(confidence.reason || "")}</div>
+  `;
+  return box;
+}
+
+function renderSources(sources) {
+  const wrap = document.createElement("div");
+  if (!Array.isArray(sources) || sources.length === 0) return wrap;
+
+  wrap.className = "sources";
+  const title = document.createElement("div");
+  title.className = "sources-title";
+  title.textContent = "來源";
+  wrap.appendChild(title);
+
+  sources.forEach((src, index) => {
+    if (!src || !src.url) return;
+    const a = document.createElement("a");
+    a.className = "source-card";
+    a.href = src.url;
+    a.target = "_blank";
+    a.rel = "noopener noreferrer";
+    a.innerHTML = `
+      <div class="source-meta">${index + 1}. ${src.official ? "官方來源" : "第三方來源"}</div>
+      <div class="source-name">${escapeHtml(src.title || "未命名來源")}</div>
+      <div class="source-url">${escapeHtml(src.url || "")}</div>
+    `;
+    wrap.appendChild(a);
+  });
+
+  return wrap;
+}
+
 function addMessage(role, text, sources, steps, confidence) {
   const div = document.createElement("div");
   div.className = `message ${role}`;
-
-  const body = document.createElement("div");
-  if (role === "ai") {
-    body.className = "ai-content";
-    body.innerHTML = renderMarkdown(text);
-  } else {
-    body.textContent = text;
-  }
-  div.appendChild(body);
+  const extra = sources && !Array.isArray(sources) && typeof sources === "object"
+    ? sources
+    : { sources, steps, confidence };
 
   if (role === "ai") {
-    if (confidence && confidence.label) {
-      const box = document.createElement("div");
-      box.className = `confidence confidence-${confidence.level || "medium"}`;
-      const title = document.createElement("div");
-      title.className = "confidence-title";
-      title.textContent = `可信度：${confidence.label}`;
-      const reason = document.createElement("div");
-      reason.className = "confidence-reason";
-      reason.textContent = confidence.reason || "";
-      box.appendChild(title);
-      box.appendChild(reason);
-      div.appendChild(box);
+    if (extra.thinkingSummary) {
+      div.appendChild(renderThinkingSummary(extra.thinkingSummary));
     }
 
-    if (Array.isArray(sources) && sources.length > 0) {
-      const box = document.createElement("div");
-      box.className = "sources";
-      const title = document.createElement("div");
-      title.className = "sources-title";
-      title.textContent = "來源";
-      box.appendChild(title);
-      sources.forEach((src, index) => {
-        if (!src || !src.url) return;
-        const a = document.createElement("a");
-        a.className = "source-card";
-        a.href = src.url;
-        a.target = "_blank";
-        a.rel = "noopener noreferrer";
-        const meta = document.createElement("div");
-        meta.className = "source-meta";
-        meta.textContent = `${index + 1}. ${src.official ? "官方來源" : "第三方來源"}`;
-        const name = document.createElement("strong");
-        name.className = "source-name";
-        name.textContent = src.title || "未命名來源";
-        const url = document.createElement("small");
-        url.className = "source-url";
-        url.textContent = src.url;
-        a.appendChild(meta);
-        a.appendChild(name);
-        a.appendChild(url);
-        box.appendChild(a);
-      });
-      div.appendChild(box);
+    const body = document.createElement("div");
+    body.className = "ai-content";
+    body.innerHTML = renderMarkdown(text);
+    div.appendChild(body);
+  } else {
+    const body = document.createElement("div");
+    body.textContent = text;
+    div.appendChild(body);
+  }
+
+  if (role === "ai") {
+    if (extra.confidence) {
+      div.appendChild(renderConfidence(extra.confidence));
+    }
+
+    if (Array.isArray(extra.sources) && extra.sources.length > 0) {
+      div.appendChild(renderSources(extra.sources));
     }
 
     const copyBtn = document.createElement("button");
@@ -1001,7 +1056,13 @@ async function sendMessage() {
       const agentSteps = Array.isArray(data.steps) && data.steps.length > 0
         ? data.steps
         : fallbackAgentSteps(searchMode, data.searchCount || 0);
-      addMessage("ai", data.reply, data.sources, agentSteps, data.confidence);
+      addMessage("ai", data.reply, {
+        sources: data.sources || [],
+        steps: agentSteps,
+        confidence: data.confidence || null,
+        thinkingSummary: data.thinkingSummary || null,
+        usage: data.usage || null
+      });
       recordUsage({
         inTokens: data.usage?.prompt_tokens || 0,
         outTokens: data.usage?.completion_tokens || 0,
@@ -1016,6 +1077,7 @@ async function sendMessage() {
         sources: data.sources || [],
         steps: agentSteps,
         confidence: data.confidence,
+        thinkingSummary: data.thinkingSummary || null,
         searched: (data.searchCount || 0) > 0
       });
     } else {

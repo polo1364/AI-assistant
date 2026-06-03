@@ -316,7 +316,8 @@ const SYSTEM_PROMPT =
   "Key 安全題的低成本第一版優先建議：CSP、防 XSS、禁止第三方 script、維持 HTML escape/Markdown sanitization、清除 Key 按鈕、公用裝置提醒、sessionStorage 或不記住 Key 選項、縮短本機保存時間。" +
   "回答本專案架構、部署或下一步時，必須依照上述現況，不要建議 /api/chat、React/Vue、LangChain 或伺服器環境變數存 API Key，除非使用者明確要求改架構。" +
   "下一步清單不要用已完成勾選符號，除非使用者明確表示那些事項已完成；已經存在的功能不要寫成重新實作，應改寫為確認、部署、測試線上網址或優化。" +
-  "請使用 Markdown 格式回答；若問題是查證、比較、架構、部署、API、計費或決策題，請固定使用「## 結論」「## 依據」「## 風險」「## 建議下一步」四段 Markdown 標題；每個結論必須能被搜尋結果或本專案現況支撐。" +
+  "請使用自然但有結構的繁體中文回答，不要寫得像公文，也不要堆太多官方術語。" +
+  "若問題是查證、比較、架構、部署、API、計費或決策題，請固定使用「## 先說結論」「## 我查到的重點」「## 需要注意」「## 建議你下一步」四段 Markdown 標題；先用 1～3 句話直接回答，再用條列或表格整理重點。" +
   "若有表格資訊，請使用 Markdown 表格；若有程式碼、指令或設定範例，請使用 fenced code block 並標註語言。" +
   "回答任何問題時都要遵守正確率規則：只把有來源、使用者提供內容或明確專案事實支撐的內容寫成肯定句；不確定、來源不足或可能變動的內容要明確標示為「需確認」或「根據目前資料」；不要把推測寫成事實；不要補不存在的功能、檔案、端點或設定。" +
   "若問題需要最新資訊、官方政策、價格、限制、部署能力或第三方服務狀態，必須搜尋或明確說明需要查官方來源；官方來源不足時不可下絕對結論。" +
@@ -719,6 +720,30 @@ function buildConfidence({ sources, violations, searchCount, userMessages }) {
     level: "medium",
     label: "中",
     reason: "未使用外部來源，主要依據使用者提供內容與專案固定事實。"
+  };
+}
+
+function buildThinkingSummary({ searchMode, answerMode, steps, sources, confidence }) {
+  const officialCount = (sources || []).filter((s) => s.official).length;
+  const thirdPartyCount = (sources || []).filter((s) => !s.official).length;
+
+  return {
+    mode:
+      answerMode === "precise"
+        ? "高準確模式"
+        : answerMode === "verified"
+          ? "查證模式"
+          : "快速模式",
+    search:
+      searchMode === "off"
+        ? "未啟用網路查證"
+        : "已啟用網路查證",
+    sourceSummary:
+      sources && sources.length > 0
+        ? `使用 ${sources.length} 個來源，其中官方來源 ${officialCount} 個、第三方來源 ${thirdPartyCount} 個。`
+        : "未使用外部來源。",
+    confidence: confidence?.label || "中",
+    steps: (steps || []).slice(0, 5)
   };
 }
 
@@ -1555,7 +1580,14 @@ app.post("/api/ask", async (req, res) => {
       searchMode: usedSearchMode,
       answerMode: usedAnswerMode,
       steps: result.steps || [],
-      confidence
+      confidence,
+      thinkingSummary: buildThinkingSummary({
+        searchMode: usedSearchMode,
+        answerMode: usedAnswerMode,
+        steps: result.steps || [],
+        sources: result.sources || [],
+        confidence
+      })
     });
   } catch (error) {
     console.error("Server error:", error);
