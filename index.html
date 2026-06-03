@@ -6,7 +6,7 @@
   <title>蝦蝦 Agent 助理</title>
   <link rel="manifest" href="manifest.json" />
   <meta name="theme-color" content="#12091f" />
-  <link rel="stylesheet" href="style.css?v=agent-main-1" />
+  <link rel="stylesheet" href="style.css?v=workspace-1" />
 </head>
 <body>
   <div class="app">
@@ -56,6 +56,25 @@
             <p>輸入你要 Agent 做的事，它會先產生計畫，再讀檔、分析、產生 diff，最後由你確認是否寫入。</p>
           </div>
         </div>
+        <label class="field">
+          <span>工作區類型</span>
+          <select id="workspaceType" class="mode-select workspace-select">
+            <option value="local">目前環境 / 本機專案</option>
+            <option value="github">GitHub 專案</option>
+            <option value="web">網路查證</option>
+          </select>
+        </label>
+        <div id="githubFields" class="workspace-fields hidden">
+          <label class="field">
+            <span>GitHub Repo</span>
+            <input id="githubRepo" placeholder="例如：你的帳號/你的repo" />
+          </label>
+          <label class="field">
+            <span>Base Branch</span>
+            <input id="githubBranch" value="main" />
+          </label>
+        </div>
+        <div id="workspaceNotice" class="workspace-notice"></div>
         <label class="field">
           <span>你要 Agent 做什麼？</span>
           <textarea id="workGoal" class="modal-textarea task-goal-input" placeholder="例如：幫我優化 server.js 的 Tavily 搜尋策略，避免查不到資料，並保留官方與第三方來源。"></textarea>
@@ -250,6 +269,6 @@
 
   <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/dompurify@3.1.6/dist/purify.min.js"></script>
-  <script src="script.js?v=agent-main-1"></script>
+  <script src="script.js?v=workspace-1"></script>
 </body>
 </html>

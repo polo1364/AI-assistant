@@ -909,6 +909,39 @@ textarea:focus {
   min-height: 150px;
 }
 
+.workspace-select {
+  width: 100%;
+}
+
+.workspace-fields {
+  display: grid;
+  grid-template-columns: 1fr 160px;
+  gap: 12px;
+  margin-top: 10px;
+}
+
+.workspace-notice,
+.warning-box,
+.info-box {
+  margin: 12px 0;
+  padding: 11px 13px;
+  border-radius: 12px;
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.warning-box {
+  border: 1px solid rgba(251, 191, 36, 0.36);
+  background: rgba(251, 191, 36, 0.1);
+  color: #fde68a;
+}
+
+.info-box {
+  border: 1px solid rgba(56, 189, 248, 0.36);
+  background: rgba(56, 189, 248, 0.1);
+  color: #bae6fd;
+}
+
 .agent-actions {
   display: flex;
   gap: 10px;

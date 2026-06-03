@@ -563,6 +563,62 @@ function renderWorkRuntime(runtime) {
   `;
 }
 
+function getWorkspacePayload() {
+  const type = document.getElementById("workspaceType")?.value || "local";
+
+  if (type === "github") {
+    return {
+      type: "github",
+      repo: document.getElementById("githubRepo")?.value.trim() || "",
+      branch: document.getElementById("githubBranch")?.value.trim() || "main"
+    };
+  }
+
+  if (type === "web") {
+    return { type: "web" };
+  }
+
+  return { type: "local" };
+}
+
+function renderWorkspaceNotice(workspace = getWorkspacePayload()) {
+  const box = document.getElementById("workspaceNotice");
+  if (!box) return;
+
+  if (workspace.type === "github") {
+    box.className = "workspace-notice info-box";
+    box.innerHTML = `
+      <strong>目前是 GitHub 專案模式</strong><br>
+      Agent 會讀取指定 repo，產生修改建議，確認後建立分支與 Pull Request，不會直接改 main。
+    `;
+    return;
+  }
+
+  if (workspace.type === "web") {
+    box.className = "workspace-notice info-box";
+    box.innerHTML = `
+      <strong>目前是網路查證模式</strong><br>
+      Agent 會搜尋資料並擷取網頁內容，不會修改任何檔案。
+    `;
+    return;
+  }
+
+  box.className = "workspace-notice warning-box";
+  box.innerHTML = `
+    <strong>目前是本機 / 部署環境模式</strong><br>
+    這只會修改 server 所在機器的專案資料夾。若部署在 Railway，不會修改你桌面的專案，也不會 commit 回 GitHub。
+  `;
+}
+
+function updateWorkspaceFields() {
+  const workspace = getWorkspacePayload();
+  const githubFields = document.getElementById("githubFields");
+  if (githubFields) {
+    githubFields.classList.toggle("hidden", workspace.type !== "github");
+  }
+  renderWorkspaceNotice(workspace);
+}
+
 async function loadWorkRuntime() {
   try {
     const response = await fetch("/api/runtime");
@@ -588,7 +644,7 @@ function renderWorkPlan(plan) {
 
   box.innerHTML = `
     <h3>任務計畫</h3>
-    <div class="work-meta">風險：${escapeHtml(plan.riskLevel || "medium")} / 需要確認：${plan.requiresUserConfirmation ? "是" : "否"}</div>
+    <div class="work-meta">工作區：${escapeHtml(plan.workspace?.type || getWorkspacePayload().type)} / 風險：${escapeHtml(plan.riskLevel || "medium")} / 需要確認：${plan.requiresUserConfirmation ? "是" : "否"}</div>
     <ol class="work-steps">${steps}</ol>
   `;
   box.classList.remove("hidden");
@@ -599,21 +655,26 @@ function renderWorkResult(data) {
   const box = document.getElementById("workResultBox");
   const readFiles = (data.readFiles || []).map((file) => `<li>${escapeHtml(file.path)} (${file.size} chars)</li>`).join("");
   const notes = (data.notes || []).map((note) => `<li>${escapeHtml(note)}</li>`).join("");
+  const sources = (data.sources || []).map((src) => `<li>${src.official ? "官方" : "第三方"}｜<a href="${escapeHtml(src.url)}" target="_blank" rel="noopener noreferrer">${escapeHtml(src.title || src.url)}</a></li>`).join("");
   const patches = (data.patches || []).map((patch) => `
     <div class="patch-card">
-      <div class="patch-title">${escapeHtml(patch.path)}</div>
+      <div class="patch-title">${escapeHtml(patch.repo ? `${patch.repo}:${patch.path}` : patch.path)}</div>
       <p>${escapeHtml(patch.reason || "AI 建議修改")}</p>
       <pre class="diff-view"><code>${escapeHtml(patch.diff || "")}</code></pre>
-      <button class="btn-primary confirm-write-btn" type="button" data-token="${escapeHtml(patch.confirmationToken)}">確認寫入</button>
+      <button class="btn-primary confirm-write-btn" type="button" data-token="${escapeHtml(patch.confirmationToken)}" data-workspace="${escapeHtml(patch.workspace || data.workspace?.type || "local")}">${patch.workspace === "github" ? "建立 PR" : "確認寫入"}</button>
     </div>
   `).join("");
+  const summaryHtml = data.workspace?.type === "web"
+    ? renderMarkdown(data.summary || "已完成執行。")
+    : escapeHtml(data.summary || "已完成執行。");
 
   box.innerHTML = `
     <h3>執行結果</h3>
-    <p>${escapeHtml(data.summary || "已完成執行。")}</p>
+    <div class="ai-content">${summaryHtml}</div>
     ${readFiles ? `<h4>已讀取檔案</h4><ul>${readFiles}</ul>` : ""}
+    ${sources ? `<h4>查證來源</h4><ul>${sources}</ul>` : ""}
     ${notes ? `<h4>備註</h4><ul>${notes}</ul>` : ""}
-    ${patches ? `<h4>待確認 diff</h4><p class="hint">請確認差異內容正確後再按「確認寫入」。不按就不會修改檔案。</p>${patches}` : "<p>沒有產生需要寫入的 diff。</p>"}
+    ${patches ? `<h4>待確認 diff</h4><p class="hint">請確認差異內容正確後再按按鈕。不按就不會修改檔案或建立 PR。</p>${patches}` : `<p>${data.workspace?.type === "web" ? "網路查證模式不會產生檔案修改。" : "沒有產生需要寫入的 diff。"}</p>`}
   `;
   box.classList.remove("hidden");
 
@@ -629,6 +690,12 @@ async function createWorkPlan() {
     return;
   }
 
+  const workspace = getWorkspacePayload();
+  if (workspace.type === "github" && !workspace.repo) {
+    alert("請先輸入 GitHub Repo，例如 username/project。");
+    return;
+  }
+
   currentWorkGoal = goal;
   document.getElementById("workPlanBtn").disabled = true;
   document.getElementById("workPlanBtn").textContent = "規劃中";
@@ -637,11 +704,12 @@ async function createWorkPlan() {
     const response = await fetch("/api/plan", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ goal })
+      body: JSON.stringify({ goal, workspace })
     });
     const data = await response.json();
     if (!response.ok) throw new Error(data.error || "產生計畫失敗");
     currentWorkPlan = data.plan;
+    currentWorkPlan.workspace = data.workspace || currentWorkPlan.workspace || workspace;
     renderWorkPlan(data.plan);
   } catch (error) {
     alert(error.message || "產生計畫失敗。");
@@ -658,6 +726,7 @@ async function executeWorkPlan() {
   }
 
   const settings = getSettings();
+  const workspace = getWorkspacePayload();
   document.getElementById("workExecuteBtn").disabled = true;
   document.getElementById("workExecuteBtn").textContent = "執行中";
 
@@ -668,7 +737,9 @@ async function executeWorkPlan() {
       body: JSON.stringify({
         goal: currentWorkGoal,
         plan: currentWorkPlan,
+        workspace,
         qwenKey: settings.qwenKey,
+        tavilyKey: settings.tavilyKey,
         model: settings.model,
         baseUrl: settings.baseUrl
       })
@@ -686,11 +757,15 @@ async function executeWorkPlan() {
 
 async function confirmWorkWrite(token, button) {
   if (!token) return;
-  if (!isLocalWorkHost()) {
+  const patchWorkspace = button?.dataset?.workspace || getWorkspacePayload().type;
+  if (patchWorkspace === "local" && !isLocalWorkHost()) {
     alert("目前不是本機網址。工作 Agent 寫入只會修改後端所在機器，遠端網址無法修改你桌面的專案檔案。請改用 http://localhost:3000。");
     return;
   }
-  if (!confirm("確認要寫入這個 diff 嗎？此動作會修改專案檔案。")) return;
+  const confirmText = patchWorkspace === "github"
+    ? "確認要建立 GitHub 分支與 Pull Request 嗎？不會直接修改 main。"
+    : "確認要寫入這個 diff 嗎？此動作會修改專案檔案。";
+  if (!confirm(confirmText)) return;
 
   const status = document.createElement("div");
   status.className = "work-write-status";
@@ -706,9 +781,14 @@ async function confirmWorkWrite(token, button) {
     });
     const data = await response.json();
     if (!response.ok) throw new Error(data.error || "寫入失敗");
-    button.textContent = "已寫入";
+    button.textContent = data.type === "github" ? "已建立 PR" : "已寫入";
     button.classList.add("written");
     status.classList.add("success");
+    if (data.type === "github") {
+      status.innerHTML = `已建立 PR：<a href="${escapeHtml(data.pullRequest?.url || "")}" target="_blank" rel="noopener noreferrer">${escapeHtml(data.pullRequest?.title || data.pullRequest?.url || "Pull Request")}</a>`;
+      addMessage("ai", `GitHub PR 已建立：${data.pullRequest?.url || ""}`);
+      return;
+    }
     const writeTime = data.lastWriteTime ? new Date(data.lastWriteTime).toLocaleString() : "";
     const hashText = data.writtenHash ? ` / hash ${String(data.writtenHash).slice(0, 8)}` : "";
     const pathText = data.absolutePath ? ` / 實際路徑：${data.absolutePath}` : "";
@@ -1363,6 +1443,11 @@ if (workGoalInput) {
   });
 }
 
+const workspaceTypeSelect = document.getElementById("workspaceType");
+if (workspaceTypeSelect) {
+  workspaceTypeSelect.addEventListener("change", updateWorkspaceFields);
+}
+
 /* ---------- 初始化 ---------- */
 (async function init() {
   const s = getSettings();
@@ -1371,6 +1456,7 @@ if (workGoalInput) {
   loadUsage();
   renderUsage();
   resetWorkAgentWorkspace();
+  updateWorkspaceFields();
   try {
     await seedTemplatesIfNeeded();
   } catch (e) {

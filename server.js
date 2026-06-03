@@ -199,6 +199,27 @@ function isSensitiveWorkRequest(goal) {
   return asksToRead && mentionsSensitive;
 }
 
+function normalizeWorkspace(workspace) {
+  const type = workspace?.type || "local";
+
+  if (!["local", "github", "web"].includes(type)) {
+    throw new Error("不支援的工作區類型。");
+  }
+
+  if (type === "github") {
+    const repo = String(workspace.repo || "").trim();
+    const branch = String(workspace.branch || "main").trim();
+
+    if (!/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(repo)) {
+      throw new Error("GitHub repo 格式錯誤，請使用 owner/repo，例如 username/project。");
+    }
+
+    return { type, repo, branch };
+  }
+
+  return { type };
+}
+
 function buildWorkPlan(goal, files) {
   const relevantFiles = pickRelevantFiles(goal, files);
   const steps = [
@@ -225,10 +246,77 @@ function buildWorkPlan(goal, files) {
 
   return {
     goal: String(goal || "").trim(),
+    workspace: { type: "local" },
     scope: "project_only",
     riskLevel: "medium",
     requiresUserConfirmation: true,
     steps
+  };
+}
+
+function buildGitHubWorkPlan(goal, workspace) {
+  return {
+    goal: String(goal || "").trim(),
+    workspace,
+    scope: "github_repo",
+    riskLevel: "medium",
+    requiresUserConfirmation: true,
+    steps: [
+      {
+        tool: "github_list_files",
+        risk: "low",
+        requiresConfirm: false,
+        reason: `讀取 ${workspace.repo} 的檔案清單。`
+      },
+      {
+        tool: "github_read_file",
+        risk: "low",
+        requiresConfirm: false,
+        reason: "讀取相關檔案以分析目前實作。"
+      },
+      {
+        tool: "github_propose_patch",
+        risk: "medium",
+        requiresConfirm: false,
+        reason: "產生 GitHub 檔案修改建議。"
+      },
+      {
+        tool: "github_create_pr",
+        risk: "medium",
+        requiresConfirm: true,
+        reason: "建立分支與 Pull Request，等待使用者確認後才執行。"
+      }
+    ]
+  };
+}
+
+function buildWebResearchPlan(goal) {
+  return {
+    goal: String(goal || "").trim(),
+    workspace: { type: "web" },
+    scope: "internet_research",
+    riskLevel: "low",
+    requiresUserConfirmation: false,
+    steps: [
+      {
+        tool: "web_search",
+        risk: "low",
+        requiresConfirm: false,
+        reason: "搜尋相關資料與官方來源。"
+      },
+      {
+        tool: "web_extract",
+        risk: "low",
+        requiresConfirm: false,
+        reason: "擷取高品質來源正文。"
+      },
+      {
+        tool: "summarize",
+        risk: "low",
+        requiresConfirm: false,
+        reason: "整理結論、依據、風險與建議下一步。"
+      }
+    ]
   };
 }
 
@@ -625,6 +713,76 @@ async function smartSearch(query, tavilyKey, options = {}) {
 
 async function tavilySearch(query, tavilyKey, options = {}) {
   return smartSearch(query, tavilyKey, options);
+}
+
+function getGitHubToken() {
+  const token = process.env.GITHUB_TOKEN;
+  if (!token) {
+    throw new Error("缺少 GITHUB_TOKEN，請在 Railway 環境變數設定。");
+  }
+  return token;
+}
+
+async function githubRequest(url, options = {}) {
+  const token = getGitHubToken();
+  const resp = await fetch(url, {
+    ...options,
+    headers: {
+      Authorization: `Bearer ${token}`,
+      Accept: "application/vnd.github+json",
+      "X-GitHub-Api-Version": "2022-11-28",
+      "Content-Type": "application/json",
+      ...(options.headers || {})
+    }
+  });
+
+  const data = await resp.json().catch(() => null);
+  if (!resp.ok) {
+    const err = new Error(data?.message || "GitHub API 呼叫失敗");
+    err.detail = data;
+    err.status = resp.status;
+    throw err;
+  }
+  return data;
+}
+
+async function getGitHubRepoTree(repo, branch = "main") {
+  const ref = await githubRequest(`https://api.github.com/repos/${repo}/git/ref/heads/${branch}`);
+  const commitSha = ref.object.sha;
+  const commit = await githubRequest(`https://api.github.com/repos/${repo}/git/commits/${commitSha}`);
+  const treeSha = commit.tree.sha;
+  const tree = await githubRequest(`https://api.github.com/repos/${repo}/git/trees/${treeSha}?recursive=1`);
+
+  const files = (tree.tree || [])
+    .filter((item) => item.type === "blob")
+    .map((item) => item.path)
+    .filter((file) => {
+      const ext = path.extname(file).toLowerCase();
+      return ALLOWED_WORK_EXTENSIONS.has(ext);
+    })
+    .filter((file) => {
+      const parts = file.split("/");
+      return !parts.some((part) => BLOCKED_PATH_PARTS.has(part) || BLOCKED_FILE_PATTERN.test(part));
+    })
+    .slice(0, 300);
+
+  return { commitSha, treeSha, files };
+}
+
+async function readGitHubFile(repo, filePath, branch = "main") {
+  const encodedPath = encodeURIComponent(filePath).replaceAll("%2F", "/");
+  const data = await githubRequest(`https://api.github.com/repos/${repo}/contents/${encodedPath}?ref=${branch}`);
+
+  if (data.type !== "file") {
+    throw new Error("GitHub 目標不是檔案。");
+  }
+
+  const content = Buffer.from(data.content || "", "base64").toString("utf8");
+  if (content.length > 180000) {
+    throw new Error(`${filePath} 太大，第一版暫不讀取。`);
+  }
+
+  return { path: filePath, sha: data.sha, content };
 }
 
 async function tavilyExtract(urls, tavilyKey) {
@@ -1444,24 +1602,348 @@ async function runAgentSearch({ userMessages, qwenKey, tavilyKey, model, baseUrl
   };
 }
 
+async function executeLocalPlan({ goal, plan, qwenKey, model, baseUrl }) {
+  const files = await listProjectFiles();
+  const readSteps = Array.isArray(plan?.steps)
+    ? plan.steps.filter((step) => step.tool === "read_file" && step.path)
+    : [];
+  const targetFiles = readSteps.length > 0
+    ? [...new Set(readSteps.map((step) => step.path))]
+    : pickRelevantFiles(goal, files);
+
+  const readFiles = [];
+  for (const file of targetFiles.slice(0, 6)) {
+    readFiles.push(await readProjectFile(file));
+  }
+
+  const proposal = await proposeProjectPatches({
+    goal,
+    files: readFiles,
+    qwenKey,
+    model,
+    baseUrl
+  });
+
+  const patches = [];
+  for (const item of proposal.patches.slice(0, 4)) {
+    const safe = normalizeProjectRelativePath(item.path);
+    const original = readFiles.find((file) => file.path === safe.relative) || await readProjectFile(safe.relative);
+    if (!Array.isArray(item.replacements) || item.replacements.length === 0) continue;
+    const content = applyReplacements(original.content, item.replacements);
+    if (!content || content === original.content) continue;
+
+    const diff = createUnifiedDiff(safe.relative, original.content, content);
+    if (!diff) continue;
+    if (countChangedLines(diff) > 80) {
+      proposal.notes.push(`${safe.relative} 的建議修改過大，已略過；請要求 Agent 拆成更小的局部修改。`);
+      continue;
+    }
+
+    const token = crypto.randomBytes(18).toString("hex");
+    pendingWrites.set(token, {
+      type: "local",
+      path: safe.relative,
+      content,
+      diff,
+      reason: String(item.reason || ""),
+      baseHash: sha256(original.content),
+      targetHash: sha256(content),
+      createdAt: Date.now()
+    });
+
+    patches.push({
+      workspace: "local",
+      path: safe.relative,
+      reason: String(item.reason || "套用 AI 建議修改。"),
+      diff,
+      confirmationToken: token,
+      expiresInSeconds: Math.floor(WRITE_TOKEN_TTL_MS / 1000)
+    });
+  }
+
+  cleanupPendingWrites();
+  return {
+    goal,
+    workspace: { type: "local" },
+    steps: [
+      "list_files：已列出本專案可操作檔案",
+      ...readFiles.map((file) => `read_file：已讀取 ${file.path}`),
+      "propose_patch：已產生修改建議與 diff，尚未寫入"
+    ],
+    readFiles: readFiles.map((file) => ({ path: file.path, size: file.content.length })),
+    summary: proposal.summary,
+    notes: proposal.notes,
+    patches
+  };
+}
+
+async function executeGitHubPlan({ goal, workspace, qwenKey, model, baseUrl }) {
+  const repoInfo = await getGitHubRepoTree(workspace.repo, workspace.branch);
+  const targetFiles = pickRelevantFiles(goal, repoInfo.files).slice(0, 6);
+
+  const readFiles = [];
+  for (const file of targetFiles) {
+    readFiles.push(await readGitHubFile(workspace.repo, file, workspace.branch));
+  }
+
+  const proposal = await proposeProjectPatches({
+    goal,
+    files: readFiles.map((file) => ({ path: file.path, content: file.content })),
+    qwenKey,
+    model,
+    baseUrl
+  });
+
+  const patches = [];
+  for (const item of proposal.patches.slice(0, 4)) {
+    const original = readFiles.find((file) => file.path === item.path);
+    if (!original || !Array.isArray(item.replacements) || item.replacements.length === 0) continue;
+
+    const content = applyReplacements(original.content, item.replacements);
+    if (!content || content === original.content) continue;
+
+    const diff = createUnifiedDiff(item.path, original.content, content);
+    if (!diff) continue;
+    if (countChangedLines(diff) > 80) {
+      proposal.notes.push(`${item.path} 的建議修改過大，已略過；請要求 Agent 拆成更小的局部修改。`);
+      continue;
+    }
+
+    const token = crypto.randomBytes(18).toString("hex");
+    pendingWrites.set(token, {
+      type: "github",
+      repo: workspace.repo,
+      branch: workspace.branch,
+      path: item.path,
+      originalSha: original.sha,
+      content,
+      diff,
+      reason: String(item.reason || ""),
+      baseHash: sha256(original.content),
+      targetHash: sha256(content),
+      createdAt: Date.now()
+    });
+
+    patches.push({
+      workspace: "github",
+      repo: workspace.repo,
+      branch: workspace.branch,
+      path: item.path,
+      reason: String(item.reason || "套用 AI 建議修改。"),
+      diff,
+      confirmationToken: token,
+      expiresInSeconds: Math.floor(WRITE_TOKEN_TTL_MS / 1000)
+    });
+  }
+
+  cleanupPendingWrites();
+  return {
+    goal,
+    workspace,
+    steps: [
+      `github_list_files：已讀取 ${workspace.repo} 檔案清單`,
+      ...readFiles.map((file) => `github_read_file：已讀取 ${file.path}`),
+      "github_propose_patch：已產生 GitHub 修改建議，尚未寫入"
+    ],
+    readFiles: readFiles.map((file) => ({ path: file.path, size: file.content.length })),
+    summary: proposal.summary,
+    notes: [
+      ...(proposal.notes || []),
+      "GitHub 模式會建立分支與 PR，不會直接改 main。"
+    ],
+    patches
+  };
+}
+
+async function executeWebResearchPlan({ goal, qwenKey, tavilyKey, model, baseUrl }) {
+  if (!qwenKey) throw new Error("缺少 Qwen API Key。");
+  if (!tavilyKey) throw new Error("Web 查證模式需要 Tavily API Key。");
+
+  const searchData = await smartSearch(goal, tavilyKey, {
+    maxResults: 6,
+    searchDepth: "basic"
+  });
+  const extracted = await extractForSearchResults(searchData, tavilyKey);
+  const built = buildSearchContext(searchData, extracted);
+  const extractContext = extracted?.error
+    ? "網頁全文擷取失敗，改用搜尋摘要回答。"
+    : JSON.stringify(extracted).slice(0, 20000);
+  const prompt =
+    `請根據搜尋結果與網頁內容回答任務。\n\n` +
+    `任務：${goal}\n\n` +
+    `搜尋內容：\n${built.context}\n\n` +
+    `網頁擷取：\n${extractContext}\n\n` +
+    "請用「先說結論、我查到的重點、需要注意、建議你下一步」格式回答。";
+
+  const data = await callQwen({
+    baseUrl,
+    qwenKey,
+    model,
+    messages: [
+      { role: "system", content: SEARCH_SYSTEM_PROMPT },
+      { role: "user", content: prompt }
+    ],
+    toolChoice: "none",
+    temperature: 0.1
+  });
+
+  return {
+    goal,
+    workspace: { type: "web" },
+    steps: [
+      "web_search：已搜尋相關資料",
+      "web_extract：已嘗試擷取前 3 個來源正文",
+      "summarize：已整理查證結果"
+    ],
+    summary: stripInlineSources(data.choices?.[0]?.message?.content || "沒有取得回覆。"),
+    sources: built.sources,
+    patches: [],
+    notes: []
+  };
+}
+
+async function confirmLocalWrite(token, pending) {
+  const safe = normalizeProjectRelativePath(pending.path);
+  const beforeContent = await fsp.readFile(safe.absolute, "utf8");
+  const beforeHash = sha256(beforeContent);
+  if (beforeHash !== pending.baseHash) {
+    pendingWrites.delete(token);
+    const err = new Error(`檔案 ${safe.relative} 在產生 diff 後已變更，為避免覆蓋新內容，請重新產生計畫與 diff。`);
+    err.status = 409;
+    throw err;
+  }
+
+  await fsp.writeFile(safe.absolute, pending.content, "utf8");
+  const now = new Date();
+  await fsp.utimes(safe.absolute, now, now);
+
+  const writtenContent = await fsp.readFile(safe.absolute, "utf8");
+  const writtenHash = sha256(writtenContent);
+  if (writtenHash !== pending.targetHash) {
+    throw new Error(`寫入 ${safe.relative} 後驗證失敗，檔案內容未符合預期。`);
+  }
+  const stat = await fsp.stat(safe.absolute);
+  pendingWrites.delete(token);
+
+  return {
+    ok: true,
+    type: "local",
+    path: safe.relative,
+    absolutePath: safe.absolute,
+    projectRoot: PROJECT_ROOT,
+    message: `已寫入 ${safe.relative}。`,
+    verified: true,
+    beforeHash,
+    writtenHash,
+    lastWriteTime: stat.mtime.toISOString(),
+    bytes: Buffer.byteLength(writtenContent, "utf8"),
+    diff: pending.diff
+  };
+}
+
+async function confirmGitHubWrite(token, pending) {
+  const branchName = `agent/${Date.now()}-${pending.path.replace(/[^a-zA-Z0-9]/g, "-").slice(0, 40)}`;
+  const ref = await githubRequest(`https://api.github.com/repos/${pending.repo}/git/ref/heads/${pending.branch}`);
+  const baseSha = ref.object.sha;
+
+  await githubRequest(`https://api.github.com/repos/${pending.repo}/git/refs`, {
+    method: "POST",
+    body: JSON.stringify({
+      ref: `refs/heads/${branchName}`,
+      sha: baseSha
+    })
+  });
+
+  const encodedPath = encodeURIComponent(pending.path).replaceAll("%2F", "/");
+  const updated = await githubRequest(`https://api.github.com/repos/${pending.repo}/contents/${encodedPath}`, {
+    method: "PUT",
+    body: JSON.stringify({
+      message: `Agent update ${pending.path}`,
+      content: Buffer.from(pending.content, "utf8").toString("base64"),
+      sha: pending.originalSha,
+      branch: branchName
+    })
+  });
+
+  const pr = await githubRequest(`https://api.github.com/repos/${pending.repo}/pulls`, {
+    method: "POST",
+    body: JSON.stringify({
+      title: `Agent 建議修改：${pending.path}`,
+      head: branchName,
+      base: pending.branch,
+      body:
+        `此 PR 由蝦蝦 Agent 助理產生。\n\n` +
+        `## 修改原因\n\n${pending.reason || "套用 AI 建議修改。"}\n\n` +
+        `## Diff 摘要\n\n\`\`\`diff\n${pending.diff}\n\`\`\`\n\n` +
+        "請人工確認後再合併。"
+    })
+  });
+
+  pendingWrites.delete(token);
+  return {
+    ok: true,
+    type: "github",
+    repo: pending.repo,
+    branch: branchName,
+    baseBranch: pending.branch,
+    path: pending.path,
+    message: "已建立 GitHub 分支與 Pull Request。",
+    commitSha: updated.commit?.sha,
+    pullRequest: {
+      number: pr.number,
+      title: pr.title,
+      url: pr.html_url
+    },
+    diff: pending.diff
+  };
+}
+
 app.post("/api/plan", async (req, res) => {
   try {
-    const { goal } = req.body || {};
-    if (!String(goal || "").trim()) {
+    const { goal, workspace } = req.body || {};
+    const workGoal = String(goal || "").trim();
+    if (!workGoal) {
       return res.status(400).json({ error: "缺少任務目標。" });
     }
-    if (isSensitiveWorkRequest(goal)) {
+    const ws = normalizeWorkspace(workspace);
+    if (isSensitiveWorkRequest(workGoal)) {
       return res.status(400).json({
         error: "這個任務目標涉及讀取敏感檔案或憑證資訊，任務 Agent 第一版不允許規劃此類操作。"
       });
     }
 
+    if (ws.type === "github") {
+      return res.json({
+        plan: buildGitHubWorkPlan(workGoal, ws),
+        availableTools: {
+          github_list_files: { risk: "low", requiresConfirm: false },
+          github_read_file: { risk: "low", requiresConfirm: false },
+          github_propose_patch: { risk: "medium", requiresConfirm: false },
+          github_create_pr: { risk: "medium", requiresConfirm: true }
+        },
+        workspace: ws
+      });
+    }
+
+    if (ws.type === "web") {
+      return res.json({
+        plan: buildWebResearchPlan(workGoal),
+        availableTools: {
+          web_search: { risk: "low", requiresConfirm: false },
+          web_extract: { risk: "low", requiresConfirm: false },
+          summarize: { risk: "low", requiresConfirm: false }
+        },
+        workspace: ws
+      });
+    }
+
     const files = await listProjectFiles();
-    const plan = buildWorkPlan(goal, files);
+    const plan = buildWorkPlan(workGoal, files);
     res.json({
       plan,
       availableTools: WORK_TOOLS,
-      files: files.slice(0, 80)
+      files: files.slice(0, 80),
+      workspace: ws
     });
   } catch (error) {
     res.status(400).json({ error: error.message || "產生任務計畫失敗。" });
@@ -1470,84 +1952,42 @@ app.post("/api/plan", async (req, res) => {
 
 app.post("/api/execute", async (req, res) => {
   try {
-    const { goal, plan, qwenKey, model, baseUrl } = req.body || {};
+    const { goal, plan, workspace, qwenKey, tavilyKey, model, baseUrl } = req.body || {};
     const workGoal = String(goal || plan?.goal || "").trim();
     if (!workGoal) return res.status(400).json({ error: "缺少任務目標。" });
 
     const usedModel = model || "qwen-flash";
-    const usedBaseUrl = baseUrl || "https://dashscope-intl.aliyuncs.com/compatible-mode/v1";
-    const files = await listProjectFiles();
-    const readSteps = Array.isArray(plan?.steps)
-      ? plan.steps.filter((step) => step.tool === "read_file" && step.path)
-      : [];
-    const targetFiles = readSteps.length > 0
-      ? [...new Set(readSteps.map((step) => step.path))]
-      : pickRelevantFiles(workGoal, files);
+    const usedBaseUrl = baseUrl || PROJECT_FACTS.qwenBaseUrl;
+    const ws = normalizeWorkspace(workspace || plan?.workspace);
 
-    const readFiles = [];
-    for (const file of targetFiles.slice(0, 6)) {
-      readFiles.push(await readProjectFile(file));
+    if (ws.type === "github") {
+      return res.json(await executeGitHubPlan({
+        goal: workGoal,
+        plan,
+        workspace: ws,
+        qwenKey,
+        model: usedModel,
+        baseUrl: usedBaseUrl
+      }));
     }
 
-    const proposal = await proposeProjectPatches({
+    if (ws.type === "web") {
+      return res.json(await executeWebResearchPlan({
+        goal: workGoal,
+        qwenKey,
+        tavilyKey,
+        model: usedModel,
+        baseUrl: usedBaseUrl
+      }));
+    }
+
+    res.json(await executeLocalPlan({
       goal: workGoal,
-      files: readFiles,
+      plan,
       qwenKey,
       model: usedModel,
       baseUrl: usedBaseUrl
-    });
-
-    const patches = [];
-    for (const item of proposal.patches.slice(0, 4)) {
-      const safe = normalizeProjectRelativePath(item.path);
-      const original = readFiles.find((file) => file.path === safe.relative) || await readProjectFile(safe.relative);
-      if (!Array.isArray(item.replacements) || item.replacements.length === 0) continue;
-      const content = applyReplacements(original.content, item.replacements);
-      if (!content || content === original.content) continue;
-
-      const diff = createUnifiedDiff(safe.relative, original.content, content);
-      if (!diff) continue;
-      if (countChangedLines(diff) > 80) {
-        proposal.notes.push(`${safe.relative} 的建議修改過大，已略過；請要求 Agent 拆成更小的局部修改。`);
-        continue;
-      }
-
-      const token = crypto.randomBytes(18).toString("hex");
-      pendingWrites.set(token, {
-        path: safe.relative,
-        content,
-        diff,
-        reason: String(item.reason || ""),
-        baseHash: sha256(original.content),
-        targetHash: sha256(content),
-        createdAt: Date.now()
-      });
-
-      patches.push({
-        path: safe.relative,
-        reason: String(item.reason || "套用 AI 建議修改。"),
-        diff,
-        confirmationToken: token,
-        expiresInSeconds: Math.floor(WRITE_TOKEN_TTL_MS / 1000)
-      });
-    }
-
-    cleanupPendingWrites();
-    res.json({
-      goal: workGoal,
-      steps: [
-        "list_files：已列出本專案可操作檔案",
-        ...readFiles.map((file) => `read_file：已讀取 ${file.path}`),
-        "propose_patch：已產生修改建議與 diff，尚未寫入"
-      ],
-      readFiles: readFiles.map((file) => ({
-        path: file.path,
-        size: file.content.length
-      })),
-      summary: proposal.summary,
-      notes: proposal.notes,
-      patches
-    });
+    }));
   } catch (error) {
     res.status(400).json({ error: error.message || "執行工作計畫失敗。" });
   }
@@ -1564,43 +2004,13 @@ app.post("/api/confirm-write", async (req, res) => {
       return res.status(403).json({ error: "確認 token 無效或已過期，請重新產生 diff。" });
     }
 
-    const safe = normalizeProjectRelativePath(pending.path);
-    const beforeContent = await fsp.readFile(safe.absolute, "utf8");
-    const beforeHash = sha256(beforeContent);
-    if (beforeHash !== pending.baseHash) {
-      pendingWrites.delete(token);
-      return res.status(409).json({
-        error: `檔案 ${safe.relative} 在產生 diff 後已變更，為避免覆蓋新內容，請重新產生計畫與 diff。`
-      });
+    if (pending.type === "github") {
+      return res.json(await confirmGitHubWrite(token, pending));
     }
 
-    await fsp.writeFile(safe.absolute, pending.content, "utf8");
-    const now = new Date();
-    await fsp.utimes(safe.absolute, now, now);
-
-    const writtenContent = await fsp.readFile(safe.absolute, "utf8");
-    const writtenHash = sha256(writtenContent);
-    if (writtenHash !== pending.targetHash) {
-      throw new Error(`寫入 ${safe.relative} 後驗證失敗，檔案內容未符合預期。`);
-    }
-    const stat = await fsp.stat(safe.absolute);
-    pendingWrites.delete(token);
-
-    res.json({
-      ok: true,
-      path: safe.relative,
-      absolutePath: safe.absolute,
-      projectRoot: PROJECT_ROOT,
-      message: `已寫入 ${safe.relative}。`,
-      verified: true,
-      beforeHash,
-      writtenHash,
-      lastWriteTime: stat.mtime.toISOString(),
-      bytes: Buffer.byteLength(writtenContent, "utf8"),
-      diff: pending.diff
-    });
+    res.json(await confirmLocalWrite(token, pending));
   } catch (error) {
-    res.status(400).json({ error: error.message || "確認寫入失敗。" });
+    res.status(error.status || 400).json({ error: error.message || "確認寫入失敗。" });
   }
 });
 
