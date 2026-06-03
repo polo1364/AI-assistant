@@ -6,7 +6,7 @@
   <title>蝦蝦智能助理</title>
   <link rel="manifest" href="manifest.json" />
   <meta name="theme-color" content="#12091f" />
-  <link rel="stylesheet" href="style.css?v=thinking-ui-1" />
+  <link rel="stylesheet" href="style.css?v=agent-resources-1" />
 </head>
 <body>
   <div class="app">
@@ -42,6 +42,7 @@
       <div class="toolbar-actions">
         <button id="newChatBtn" class="chip-btn">新對話</button>
         <button id="workAgentBtn" class="chip-btn">工作 Agent</button>
+        <button id="resourcesBtn" class="chip-btn">資源</button>
         <button id="templatesBtn" class="chip-btn">模板</button>
         <button id="historyBtn" class="chip-btn">歷史</button>
       </div>
@@ -235,8 +236,25 @@
     </div>
   </div>
 
+  <!-- Agent 學習資源模態視窗 -->
+  <div id="resourcesModal" class="modal-overlay hidden">
+    <div class="modal modal-wide">
+      <div class="modal-header">
+        <h2>Agent 學習資源</h2>
+        <button class="close-btn" onclick="closeModal('resourcesModal')">×</button>
+      </div>
+      <div class="modal-body">
+        <p class="hint">整理自 Datawhale Hello-Agents。這些資源適合用來學習 Agent 架構、工具、記憶、協議、評估與實戰案例。</p>
+        <div id="resourcesList" class="resource-grid"></div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn-primary" onclick="closeModal('resourcesModal')">關閉</button>
+      </div>
+    </div>
+  </div>
+
   <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/dompurify@3.1.6/dist/purify.min.js"></script>
-  <script src="script.js?v=thinking-ui-1"></script>
+  <script src="script.js?v=agent-resources-1"></script>
 </body>
 </html>

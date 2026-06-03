@@ -42,6 +42,81 @@ const DB_NAME = "qwen_assistant_db";
 const DB_VERSION = 1;
 const TEMPLATES_SEEDED_KEY = "qwen_assistant_templates_seeded";
 
+const AGENT_RESOURCES = [
+  {
+    category: "入門路線",
+    title: "Hello-Agents 線上教程",
+    desc: "Datawhale 的系統性 Agent 教程，從智能體概念、LLM 基礎到多智能體實戰。",
+    url: "https://datawhalechina.github.io/hello-agents/"
+  },
+  {
+    category: "核心范式",
+    title: "ReAct / Plan-and-Solve / Reflection",
+    desc: "學習 Agent 如何思考、規劃、使用工具與自我反思，適合改進本助理的規劃與驗證流程。",
+    url: "https://github.com/datawhalechina/hello-agents/blob/main/docs/chapter4/%E7%AC%AC%E5%9B%9B%E7%AB%A0%20%E6%99%BA%E8%83%BD%E4%BD%93%E7%BB%8F%E5%85%B8%E8%8C%83%E5%BC%8F%E6%9E%84%E5%BB%BA.md"
+  },
+  {
+    category: "低代碼平台",
+    title: "Coze / Dify / n8n",
+    desc: "理解流程驅動 Agent 與 AI Native Agent 的差異，可用於設計本助理的半自動工作流。",
+    url: "https://github.com/datawhalechina/hello-agents/blob/main/docs/chapter5/%E7%AC%AC%E4%BA%94%E7%AB%A0%20%E5%9F%BA%E4%BA%8E%E4%BD%8E%E4%BB%A3%E7%A0%81%E5%B9%B3%E5%8F%B0%E7%9A%84%E6%99%BA%E8%83%BD%E4%BD%93%E6%90%AD%E5%BB%BA.md"
+  },
+  {
+    category: "框架實戰",
+    title: "AutoGen / AgentScope / LangGraph",
+    desc: "了解主流 Agent 框架如何拆分角色、工具、狀態與多步執行。",
+    url: "https://github.com/datawhalechina/hello-agents/blob/main/docs/chapter6/%E7%AC%AC%E5%85%AD%E7%AB%A0%20%E6%A1%86%E6%9E%B6%E5%BC%80%E5%8F%91%E5%AE%9E%E8%B7%B5.md"
+  },
+  {
+    category: "自研框架",
+    title: "從 0 構建 Agent 框架",
+    desc: "適合參考工具註冊、執行器、記憶、規劃與回報架構。",
+    url: "https://github.com/datawhalechina/hello-agents/blob/main/docs/chapter7/%E7%AC%AC%E4%B8%83%E7%AB%A0%20%E6%9E%84%E5%BB%BA%E4%BD%A0%E7%9A%84Agent%E6%A1%86%E6%9E%B6.md"
+  },
+  {
+    category: "記憶檢索",
+    title: "Memory / RAG / 儲存",
+    desc: "可用來規劃後續加入長期記憶、知識庫與檢索增強回答。",
+    url: "https://github.com/datawhalechina/hello-agents/blob/main/docs/chapter8/%E7%AC%AC%E5%85%AB%E7%AB%A0%20%E8%AE%B0%E5%BF%86%E4%B8%8E%E6%A3%80%E7%B4%A2.md"
+  },
+  {
+    category: "上下文工程",
+    title: "Context Engineering",
+    desc: "學習如何管理多輪對話、工具結果、外部資料與任務狀態。",
+    url: "https://github.com/datawhalechina/hello-agents/blob/main/docs/chapter9/%E7%AC%AC%E4%B9%9D%E7%AB%A0%20%E4%B8%8A%E4%B8%8B%E6%96%87%E5%B7%A5%E7%A8%8B.md"
+  },
+  {
+    category: "協議",
+    title: "MCP / A2A / ANP",
+    desc: "適合規劃未來接 Gmail、Sheet、Calendar、GitHub 等外部工具。",
+    url: "https://github.com/datawhalechina/hello-agents/blob/main/docs/chapter10/%E7%AC%AC%E5%8D%81%E7%AB%A0%20%E6%99%BA%E8%83%BD%E4%BD%93%E9%80%9A%E4%BF%A1%E5%8D%8F%E8%AE%AE.md"
+  },
+  {
+    category: "評估",
+    title: "Agent 性能評估",
+    desc: "用於設計可信度、查證成功率、工具成功率與回答品質指標。",
+    url: "https://github.com/datawhalechina/hello-agents/blob/main/docs/chapter12/%E7%AC%AC%E5%8D%81%E4%BA%8C%E7%AB%A0%20%E6%99%BA%E8%83%BD%E4%BD%93%E6%80%A7%E8%83%BD%E8%AF%84%E4%BC%B0.md"
+  },
+  {
+    category: "實戰案例",
+    title: "DeepResearch Agent",
+    desc: "適合參考多輪搜尋、資料抽取、來源整理與研究報告生成。",
+    url: "https://github.com/datawhalechina/hello-agents/blob/main/docs/chapter14/%E7%AC%AC%E5%8D%81%E5%9B%9B%E7%AB%A0%20%E8%87%AA%E5%8A%A8%E5%8C%96%E6%B7%B1%E5%BA%A6%E7%A0%94%E7%A9%B6%E6%99%BA%E8%83%BD%E4%BD%93.md"
+  },
+  {
+    category: "延伸",
+    title: "Agent Skills 與 MCP 對比",
+    desc: "幫助理解 Skills、MCP、工具調用與可插拔能力之間的差異。",
+    url: "https://github.com/datawhalechina/hello-agents/blob/main/Extra-Chapter/Extra05-AgentSkills%E8%A7%A3%E8%AF%BB.md"
+  },
+  {
+    category: "延伸",
+    title: "如何寫出好的 Skill",
+    desc: "適合未來把你的助理能力拆成可重用技能，例如查證、改檔、產報告。",
+    url: "https://github.com/datawhalechina/hello-agents/blob/main/Extra-Chapter/Extra08-%E5%A6%82%E4%BD%95%E5%86%99%E5%87%BA%E5%A5%BD%E7%9A%84Skill.md"
+  }
+];
+
 const DEFAULT_TEMPLATES = [
   {
     name: "SOP整理",
@@ -332,6 +407,7 @@ function renderUsage() {
 function openModal(id) {
   if (id === "settingsModal") fillSettingsForm();
   if (id === "usageModal") renderUsage();
+  if (id === "resourcesModal") renderAgentResources();
   if (id === "templatesModal") {
     resetTemplateForm();
     renderTemplates();
@@ -343,6 +419,27 @@ function openModal(id) {
 
 function closeModal(id) {
   document.getElementById(id).classList.add("hidden");
+}
+
+function renderAgentResources() {
+  const list = document.getElementById("resourcesList");
+  if (!list) return;
+  list.innerHTML = "";
+
+  AGENT_RESOURCES.forEach((resource) => {
+    const a = document.createElement("a");
+    a.className = "resource-card";
+    a.href = resource.url;
+    a.target = "_blank";
+    a.rel = "noopener noreferrer";
+    a.innerHTML = `
+      <div class="resource-category">${escapeHtml(resource.category)}</div>
+      <div class="resource-title">${escapeHtml(resource.title)}</div>
+      <div class="resource-desc">${escapeHtml(resource.desc)}</div>
+      <div class="resource-url">${escapeHtml(resource.url)}</div>
+    `;
+    list.appendChild(a);
+  });
 }
 
 function resetWorkAgentModal() {
@@ -1124,13 +1221,14 @@ function resetInputHeight() {
 document.getElementById("settingsBtn").onclick = () => openModal("settingsModal");
 document.getElementById("usageBtn").onclick = () => openModal("usageModal");
 document.getElementById("workAgentBtn").onclick = () => openModal("workAgentModal");
+document.getElementById("resourcesBtn").onclick = () => openModal("resourcesModal");
 document.getElementById("templatesBtn").onclick = () => openModal("templatesModal");
 document.getElementById("historyBtn").onclick = () => openModal("historyModal");
 document.getElementById("newChatBtn").onclick = resetConversation;
 document.getElementById("workPlanBtn").onclick = createWorkPlan;
 document.getElementById("workExecuteBtn").onclick = executeWorkPlan;
 
-["settingsModal", "usageModal", "templatesModal", "historyModal", "workAgentModal"].forEach((id) => {
+["settingsModal", "usageModal", "templatesModal", "historyModal", "workAgentModal", "resourcesModal"].forEach((id) => {
   const overlay = document.getElementById(id);
   overlay.addEventListener("click", (e) => {
     if (e.target === overlay) overlay.classList.add("hidden");
