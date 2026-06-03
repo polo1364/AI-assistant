@@ -1626,42 +1626,51 @@ async function executeLocalPlan({ goal, plan, qwenKey, model, baseUrl }) {
 
   const patches = [];
   for (const item of proposal.patches.slice(0, 4)) {
-    const safe = normalizeProjectRelativePath(item.path);
-    const original = readFiles.find((file) => file.path === safe.relative) || await readProjectFile(safe.relative);
-    if (!Array.isArray(item.replacements) || item.replacements.length === 0) continue;
-    const content = applyReplacements(original.content, item.replacements);
-    if (!content || content === original.content) continue;
+    let safe;
+    try {
+      safe = normalizeProjectRelativePath(item.path);
+      const original = readFiles.find((file) => file.path === safe.relative) || await readProjectFile(safe.relative);
+      if (!Array.isArray(item.replacements) || item.replacements.length === 0) continue;
+      const content = applyReplacements(original.content, item.replacements);
+      if (!content || content === original.content) continue;
 
-    const diff = createUnifiedDiff(safe.relative, original.content, content);
-    if (!diff) continue;
-    if (countChangedLines(diff) > 80) {
-      proposal.notes.push(`${safe.relative} 的建議修改過大，已略過；請要求 Agent 拆成更小的局部修改。`);
+      const diff = createUnifiedDiff(safe.relative, original.content, content);
+      if (!diff) continue;
+      if (countChangedLines(diff) > 80) {
+        proposal.notes.push(`${safe.relative} 的建議修改過大，已略過；請要求 Agent 拆成更小的局部修改。`);
+        continue;
+      }
+
+      const token = crypto.randomBytes(18).toString("hex");
+      pendingWrites.set(token, {
+        type: "local",
+        path: safe.relative,
+        content,
+        diff,
+        reason: String(item.reason || ""),
+        baseHash: sha256(original.content),
+        targetHash: sha256(content),
+        createdAt: Date.now()
+      });
+
+      patches.push({
+        workspace: "local",
+        path: safe.relative,
+        reason: String(item.reason || "套用 AI 建議修改。"),
+        diff,
+        confirmationToken: token,
+        expiresInSeconds: Math.floor(WRITE_TOKEN_TTL_MS / 1000)
+      });
+    } catch (error) {
+      proposal.notes.push(`${safe?.relative || item.path || "未知檔案"} 的 patch 無法套用：${error.message}`);
       continue;
     }
-
-    const token = crypto.randomBytes(18).toString("hex");
-    pendingWrites.set(token, {
-      type: "local",
-      path: safe.relative,
-      content,
-      diff,
-      reason: String(item.reason || ""),
-      baseHash: sha256(original.content),
-      targetHash: sha256(content),
-      createdAt: Date.now()
-    });
-
-    patches.push({
-      workspace: "local",
-      path: safe.relative,
-      reason: String(item.reason || "套用 AI 建議修改。"),
-      diff,
-      confirmationToken: token,
-      expiresInSeconds: Math.floor(WRITE_TOKEN_TTL_MS / 1000)
-    });
   }
 
   cleanupPendingWrites();
+  if (proposal.patches.length > 0 && patches.length === 0) {
+    proposal.notes.push("AI 有提出修改，但所有 patch 都無法安全套用，因此未建立確認寫入按鈕。請把任務描述改得更具體，或要求 Agent 只修改較小段落。");
+  }
   return {
     goal,
     workspace: { type: "local" },
@@ -1696,47 +1705,55 @@ async function executeGitHubPlan({ goal, workspace, qwenKey, model, baseUrl }) {
 
   const patches = [];
   for (const item of proposal.patches.slice(0, 4)) {
-    const original = readFiles.find((file) => file.path === item.path);
-    if (!original || !Array.isArray(item.replacements) || item.replacements.length === 0) continue;
+    try {
+      const original = readFiles.find((file) => file.path === item.path);
+      if (!original || !Array.isArray(item.replacements) || item.replacements.length === 0) continue;
 
-    const content = applyReplacements(original.content, item.replacements);
-    if (!content || content === original.content) continue;
+      const content = applyReplacements(original.content, item.replacements);
+      if (!content || content === original.content) continue;
 
-    const diff = createUnifiedDiff(item.path, original.content, content);
-    if (!diff) continue;
-    if (countChangedLines(diff) > 80) {
-      proposal.notes.push(`${item.path} 的建議修改過大，已略過；請要求 Agent 拆成更小的局部修改。`);
+      const diff = createUnifiedDiff(item.path, original.content, content);
+      if (!diff) continue;
+      if (countChangedLines(diff) > 80) {
+        proposal.notes.push(`${item.path} 的建議修改過大，已略過；請要求 Agent 拆成更小的局部修改。`);
+        continue;
+      }
+
+      const token = crypto.randomBytes(18).toString("hex");
+      pendingWrites.set(token, {
+        type: "github",
+        repo: workspace.repo,
+        branch: workspace.branch,
+        path: item.path,
+        originalSha: original.sha,
+        content,
+        diff,
+        reason: String(item.reason || ""),
+        baseHash: sha256(original.content),
+        targetHash: sha256(content),
+        createdAt: Date.now()
+      });
+
+      patches.push({
+        workspace: "github",
+        repo: workspace.repo,
+        branch: workspace.branch,
+        path: item.path,
+        reason: String(item.reason || "套用 AI 建議修改。"),
+        diff,
+        confirmationToken: token,
+        expiresInSeconds: Math.floor(WRITE_TOKEN_TTL_MS / 1000)
+      });
+    } catch (error) {
+      proposal.notes.push(`${item.path || "未知檔案"} 的 GitHub patch 無法套用：${error.message}`);
       continue;
     }
-
-    const token = crypto.randomBytes(18).toString("hex");
-    pendingWrites.set(token, {
-      type: "github",
-      repo: workspace.repo,
-      branch: workspace.branch,
-      path: item.path,
-      originalSha: original.sha,
-      content,
-      diff,
-      reason: String(item.reason || ""),
-      baseHash: sha256(original.content),
-      targetHash: sha256(content),
-      createdAt: Date.now()
-    });
-
-    patches.push({
-      workspace: "github",
-      repo: workspace.repo,
-      branch: workspace.branch,
-      path: item.path,
-      reason: String(item.reason || "套用 AI 建議修改。"),
-      diff,
-      confirmationToken: token,
-      expiresInSeconds: Math.floor(WRITE_TOKEN_TTL_MS / 1000)
-    });
   }
 
   cleanupPendingWrites();
+  if (proposal.patches.length > 0 && patches.length === 0) {
+    proposal.notes.push("AI 有提出 GitHub 修改，但所有 patch 都無法安全套用，因此未建立 PR 按鈕。請把任務描述改得更具體，或要求 Agent 只修改較小段落。");
+  }
   return {
     goal,
     workspace,
