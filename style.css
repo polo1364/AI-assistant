@@ -1246,6 +1246,27 @@ textarea:focus {
   margin-top: 8px;
 }
 
+.thinking-roles {
+  margin-top: 10px;
+}
+
+.thinking-role-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 5px;
+}
+
+.thinking-role-list span {
+  padding: 4px 8px;
+  border-radius: 999px;
+  background: rgba(125, 211, 252, 0.12);
+  border: 1px solid rgba(125, 211, 252, 0.24);
+  color: #bae6fd;
+  font-size: 12px;
+  font-weight: 700;
+}
+
 .thinking-steps {
   margin-top: 10px;
   padding-top: 10px;

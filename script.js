@@ -146,6 +146,24 @@ const AGENT_RESOURCES = [
     url: "https://github.com/jnMetaCode/agency-agents-zh/tree/main/marketing"
   },
   {
+    category: "產品角色",
+    title: "產品部：產品經理、趨勢研究、回饋分析",
+    desc: "適合需求拆解、MVP、功能優先級、使用者回饋整理與產品路線規劃。",
+    url: "https://github.com/jnMetaCode/agency-agents-zh/tree/main/product"
+  },
+  {
+    category: "支援角色",
+    title: "資料分析師與高管摘要師",
+    desc: "適合報表整理、資料洞察、KPI 追蹤與把複雜資訊整理成決策摘要。",
+    url: "https://github.com/jnMetaCode/agency-agents-zh/tree/main/support"
+  },
+  {
+    category: "專案角色",
+    title: "工作流程規劃與專案管理",
+    desc: "適合任務拆解、流程設計、跨角色協作、確認節點與交付管理。",
+    url: "https://github.com/jnMetaCode/agency-agents-zh/tree/main/project-management"
+  },
+  {
     category: "測試角色",
     title: "測試部：API 測試、效能、無障礙、證據收集",
     desc: "可用來設計測試案例、檢查 UI 截圖、驗證 API 與建立品質把關流程。",
@@ -991,6 +1009,7 @@ function renderThinkingSummary(summary) {
   if (!summary) return box;
 
   const steps = Array.isArray(summary.steps) ? summary.steps : [];
+  const roles = Array.isArray(summary.roles) ? summary.roles : [];
   box.className = "thinking-card";
   box.innerHTML = `
     <div class="thinking-header">
@@ -1011,6 +1030,14 @@ function renderThinkingSummary(summary) {
         <div class="thinking-value">${escapeHtml(summary.confidence || "中")}</div>
       </div>
     </div>
+    ${
+      roles.length
+        ? `<div class="thinking-roles">
+            <div class="thinking-label">啟用角色</div>
+            <div class="thinking-role-list">${roles.map((role) => `<span>${escapeHtml(role)}</span>`).join("")}</div>
+          </div>`
+        : ""
+    }
     <div class="thinking-source">${escapeHtml(summary.sourceSummary || "")}</div>
     ${
       steps.length

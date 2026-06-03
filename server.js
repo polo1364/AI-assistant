@@ -236,8 +236,10 @@ async function proposeProjectPatches({ goal, files, qwenKey, model, baseUrl }) {
     };
   }
 
+  const roles = selectAgentRoles(goal);
   const prompt =
     "你是半自動工作 Agent。請根據使用者目標與專案檔案，提出必要修改。\n" +
+    `${rolePrompt(roles)}\n` +
     "只能修改提供的檔案；不要新增未提供檔案；不要輸出 Markdown；只輸出 JSON。\n" +
     "務必採用局部最小修改，不要回傳完整新檔案內容。\n" +
     "每個 replacement 的 oldText 必須是檔案中唯一出現的完整原文片段，newText 是替換後片段。\n" +
@@ -254,7 +256,8 @@ async function proposeProjectPatches({ goal, files, qwenKey, model, baseUrl }) {
       { role: "system", content: SYSTEM_PROMPT },
       { role: "user", content: prompt }
     ],
-    temperature: 0.1
+    temperature: 0.1,
+    roles
   });
 
   const parsed = safeJsonParse(data.choices?.[0]?.message?.content);
@@ -309,6 +312,82 @@ const AGENT_RESOURCE_GUIDE = [
   "當使用者詢問子 Agent 角色、專家分工、角色提示詞、Cursor/Claude Code/Copilot 角色庫或工作流角色設計時，可以推薦工具列「資源」面板中的 agency-agents-zh 精選資源。",
   "推薦資源時請說明適合用途，不要宣稱本專案已完整實作 Hello-Agents 或 agency-agents-zh 的全部內容；本專案目前只實作聊天查證、來源整理、半自動工作 Agent、確認寫入與安全限制。"
 ].join("\n");
+
+const AGENT_ROLES = {
+  backend: {
+    name: "後端架構師",
+    trigger: /後端|API|server|Express|Node|端點|路由|部署|Railway|proxy|代理/i,
+    system: "你是後端架構師，專長是 Node.js、Express、API 設計、安全、錯誤處理與可維護性。請優先檢查架構風險、端點設計、錯誤處理與部署可行性。"
+  },
+  frontend: {
+    name: "前端開發者",
+    trigger: /前端|畫面|UI|CSS|HTML|JavaScript|按鈕|手機|排版|互動|響應式|modal|樣式/i,
+    system: "你是前端開發者，專長是 HTML/CSS/JavaScript、手機版 UI、互動體驗、可讀性與效能優化。請以最小修改方式提出建議。"
+  },
+  security: {
+    name: "安全工程師",
+    trigger: /安全|XSS|Key|API Key|token|金鑰|密碼|漏洞|權限|cookie|localStorage|sessionStorage|CSP/i,
+    system: "你是安全工程師，專長是 XSS、防洩漏、權限控管、API Key 保護、確認流程與風險分級。請避免過度承諾安全性，明確區分低中高風險。"
+  },
+  docs: {
+    name: "技術文檔工程師",
+    trigger: /文件|README|教學|步驟|說明|SOP|文檔|部署說明|指南/i,
+    system: "你是技術文檔工程師，專長是 API 文件、部署指南、README、SOP 與開發者文件。請把內容整理成清楚、可複製、可執行的繁體中文文件。"
+  },
+  devops: {
+    name: "DevOps 自動化師",
+    trigger: /DevOps|CI|CD|自動化|部署|Railway|build|npm start|Procfile|docker|環境|監控|log/i,
+    system: "你是 DevOps 自動化師，專長是部署流程、CI/CD、環境設定、日誌、健康檢查與回滾策略。請優先找出部署與運維風險。"
+  },
+  ai: {
+    name: "AI 工程師",
+    trigger: /AI|LLM|Qwen|OpenAI|模型|agent|RAG|embedding|prompt|提示詞|temperature|function calling|tool/i,
+    system: "你是 AI 工程師，專長是 LLM API、工具調用、RAG、提示詞、模型選型、成本控制與回答品質評估。請兼顧準確率、成本與可維護性。"
+  },
+  product: {
+    name: "產品經理",
+    trigger: /產品|需求|功能|使用者|體驗|優先級|MVP|規劃|路線圖|流程/i,
+    system: "你是產品經理，專長是需求拆解、MVP、使用者流程、優先級與風險取捨。請用可落地的方式整理需求與下一步。"
+  },
+  content: {
+    name: "內容創作者",
+    trigger: /文案|內容|貼文|文章|社群|行銷|標題|腳本|短影音|介紹|說服/i,
+    system: "你是內容創作者，專長是清楚、有吸引力且可直接使用的繁體中文內容。請避免空泛口號，產出可複製版本。"
+  },
+  data: {
+    name: "資料分析師",
+    trigger: /資料|數據|分析|表格|統計|指標|KPI|報表|趨勢|股價|財報|營收/i,
+    system: "你是資料分析師，專長是資料整理、指標解讀、表格呈現、趨勢分析與不確定性說明。請區分事實、估計與推論。"
+  },
+  workflow: {
+    name: "工作流程規劃師",
+    trigger: /流程|工作流|自動化|SOP|步驟|計畫|任務|代理工作|半自動|確認|審核/i,
+    system: "你是工作流程規劃師，專長是任務拆解、權限分級、確認節點、工具執行順序與風險控管。請先規劃再執行。"
+  }
+};
+
+function selectAgentRoles(userText, limit = 3) {
+  const text = String(userText || "");
+  const selected = Object.entries(AGENT_ROLES)
+    .filter(([, role]) => role.trigger.test(text))
+    .map(([id, role]) => ({ id, name: role.name, system: role.system }));
+
+  if (selected.length === 0) {
+    return [{
+      id: "general",
+      name: "通用助理",
+      system: "你是繁體中文 AI 助理，請清楚、實用、保守且可執行地回答。"
+    }];
+  }
+  return selected.slice(0, limit);
+}
+
+function rolePrompt(roles) {
+  return [
+    `目前啟用角色：${roles.map((r) => r.name).join("、")}`,
+    ...roles.map((r) => `- ${r.name}：${r.system}`)
+  ].join("\n");
+}
 
 const SYSTEM_PROMPT =
   "你是一位繁體中文低成本 Agent 助理。請用清楚、實用、可直接複製的方式回答。" +
@@ -734,7 +813,7 @@ function buildConfidence({ sources, violations, searchCount, userMessages }) {
   };
 }
 
-function buildThinkingSummary({ searchMode, answerMode, steps, sources, confidence }) {
+function buildThinkingSummary({ searchMode, answerMode, steps, sources, confidence, roles }) {
   const officialCount = (sources || []).filter((s) => s.official).length;
   const thirdPartyCount = (sources || []).filter((s) => !s.official).length;
 
@@ -753,6 +832,7 @@ function buildThinkingSummary({ searchMode, answerMode, steps, sources, confiden
       sources && sources.length > 0
         ? `使用 ${sources.length} 個來源，其中官方來源 ${officialCount} 個、第三方來源 ${thirdPartyCount} 個。`
         : "未使用外部來源。",
+    roles: (roles || []).map((r) => r.name),
     confidence: confidence?.label || "中",
     steps: (steps || []).slice(0, 5)
   };
@@ -850,10 +930,23 @@ function shouldRefuseOrDefer({ sources, searchMode, userMessages, violations }) 
   };
 }
 
-async function callQwen({ baseUrl, qwenKey, model, messages, tools, toolChoice, temperature = 0.2 }) {
+function applyRolePromptToMessages(messages, roles) {
+  if (!Array.isArray(roles) || roles.length === 0) return messages;
+  const prompt = rolePrompt(roles);
+  const copied = messages.map((m) => ({ ...m }));
+  const systemIndex = copied.findIndex((m) => m.role === "system");
+  if (systemIndex >= 0) {
+    copied[systemIndex].content = `${copied[systemIndex].content}\n\n${prompt}`;
+  } else {
+    copied.unshift({ role: "system", content: prompt });
+  }
+  return copied;
+}
+
+async function callQwen({ baseUrl, qwenKey, model, messages, tools, toolChoice, temperature = 0.2, roles }) {
   const body = {
     model,
-    messages,
+    messages: applyRolePromptToMessages(messages, roles),
     temperature
   };
   if (tools) body.tools = tools;
@@ -918,7 +1011,7 @@ function fallbackPlan(userMessages, searchMode) {
   };
 }
 
-async function createAgentPlan({ userMessages, qwenKey, model, baseUrl, searchMode }) {
+async function createAgentPlan({ userMessages, qwenKey, model, baseUrl, searchMode, roles }) {
   const fallback = fallbackPlan(userMessages, searchMode);
   if (searchMode === "off") return fallback;
 
@@ -943,7 +1036,8 @@ async function createAgentPlan({ userMessages, qwenKey, model, baseUrl, searchMo
         { role: "system", content: SYSTEM_PROMPT },
         { role: "user", content: plannerPrompt }
       ],
-      temperature: 0.1
+      temperature: 0.1,
+      roles
     });
     const json = safeJsonParse(planned.choices?.[0]?.message?.content);
     if (!json) return { ...fallback, usage: planned.usage || null };
@@ -960,7 +1054,7 @@ async function createAgentPlan({ userMessages, qwenKey, model, baseUrl, searchMo
   }
 }
 
-async function executePlannedSearch({ plan, userMessages, qwenKey, tavilyKey, model, baseUrl, aggregateUsage, steps }) {
+async function executePlannedSearch({ plan, userMessages, qwenKey, tavilyKey, model, baseUrl, aggregateUsage, steps, roles }) {
   const contexts = [];
   const allSources = [];
   let searchCount = 0;
@@ -998,7 +1092,8 @@ async function executePlannedSearch({ plan, userMessages, qwenKey, tavilyKey, mo
       ...userMessages.slice(0, -1),
       { role: "user", content: finalPrompt }
     ],
-    temperature: 0.1
+    temperature: 0.1,
+    roles
   });
   mergeUsage(aggregateUsage, final.usage);
   steps.push("Writer：Qwen 根據計畫與搜尋證據產生回答");
@@ -1036,7 +1131,7 @@ function sourceSummary(sources) {
     .join("\n");
 }
 
-async function selfCheckAnswer({ reply, sources, userMessages, qwenKey, model, baseUrl }) {
+async function selfCheckAnswer({ reply, sources, userMessages, qwenKey, model, baseUrl, roles }) {
   const latest = userMessages[userMessages.length - 1]?.content || "";
   const checkPrompt =
     "請做最終自我檢查並直接輸出修正版回答，不要輸出檢查過程。\n" +
@@ -1068,7 +1163,8 @@ async function selfCheckAnswer({ reply, sources, userMessages, qwenKey, model, b
       { role: "user", content: checkPrompt }
     ],
     toolChoice: "none",
-    temperature: 0.1
+    temperature: 0.1,
+    roles
   });
 
   return {
@@ -1077,7 +1173,7 @@ async function selfCheckAnswer({ reply, sources, userMessages, qwenKey, model, b
   };
 }
 
-async function repairAnswer({ reply, violations, sources, userMessages, qwenKey, model, baseUrl }) {
+async function repairAnswer({ reply, violations, sources, userMessages, qwenKey, model, baseUrl, roles }) {
   const latest = userMessages[userMessages.length - 1]?.content || "";
   const repairPrompt =
     "請根據以下硬性違規項，直接輸出修正版回答。不要解釋你做了哪些修改。\n" +
@@ -1101,7 +1197,8 @@ async function repairAnswer({ reply, violations, sources, userMessages, qwenKey,
       { role: "system", content: SYSTEM_PROMPT },
       { role: "user", content: repairPrompt }
     ],
-    temperature: 0.1
+    temperature: 0.1,
+    roles
   });
 
   return {
@@ -1110,7 +1207,7 @@ async function repairAnswer({ reply, violations, sources, userMessages, qwenKey,
   };
 }
 
-async function runForceSearch({ userMessages, qwenKey, tavilyKey, model, baseUrl }) {
+async function runForceSearch({ userMessages, qwenKey, tavilyKey, model, baseUrl, roles }) {
   const latestUser = [...userMessages].reverse().find((m) => m.role === "user")?.content || "";
   const route = classifySearch(latestUser);
   const steps = [
@@ -1131,7 +1228,8 @@ async function runForceSearch({ userMessages, qwenKey, tavilyKey, model, baseUrl
       ...userMessages.slice(0, -1),
       { role: "user", content: `${built.context}\n---\n使用者問題：${latestUser}` }
     ],
-    temperature: 0.1
+    temperature: 0.1,
+    roles
   });
 
   return {
@@ -1143,7 +1241,7 @@ async function runForceSearch({ userMessages, qwenKey, tavilyKey, model, baseUrl
   };
 }
 
-async function runAgentSearch({ userMessages, qwenKey, tavilyKey, model, baseUrl, searchMode, answerMode }) {
+async function runAgentSearch({ userMessages, qwenKey, tavilyKey, model, baseUrl, searchMode, answerMode, roles }) {
   const aggregateUsage = { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 };
   const sources = [];
   const steps = [];
@@ -1153,13 +1251,13 @@ async function runAgentSearch({ userMessages, qwenKey, tavilyKey, model, baseUrl
   let plannedTaskType = route.profiles[0] || "general";
 
   if (searchMode === "force") {
-    const result = await runForceSearch({ userMessages, qwenKey, tavilyKey, model, baseUrl });
+    const result = await runForceSearch({ userMessages, qwenKey, tavilyKey, model, baseUrl, roles });
     mergeUsage(aggregateUsage, result.usage);
     return { ...result, usage: aggregateUsage };
   }
 
   if (searchMode === "auto") {
-    const plan = await createAgentPlan({ userMessages, qwenKey, model, baseUrl, searchMode });
+    const plan = await createAgentPlan({ userMessages, qwenKey, model, baseUrl, searchMode, roles });
     plannedTaskType = plan.taskType || plannedTaskType;
     mergeUsage(aggregateUsage, plan.usage);
     steps.push(`Planner JSON：taskType=${plan.taskType}, needsSearch=${plan.needsSearch ? "yes" : "no"}`);
@@ -1176,7 +1274,8 @@ async function runAgentSearch({ userMessages, qwenKey, tavilyKey, model, baseUrl
         model,
         baseUrl,
         aggregateUsage,
-        steps
+        steps,
+        roles
       });
       return {
         reply: planned.reply,
@@ -1204,7 +1303,8 @@ async function runAgentSearch({ userMessages, qwenKey, tavilyKey, model, baseUrl
       answerMode,
       latest: latestUser,
       taskType: plannedTaskType
-    })
+    }),
+    roles
   });
   mergeUsage(aggregateUsage, first.usage);
 
@@ -1256,7 +1356,8 @@ async function runAgentSearch({ userMessages, qwenKey, tavilyKey, model, baseUrl
       messages,
       tools: [WEB_SEARCH_TOOL],
       toolChoice: "auto",
-      temperature: 0.1
+      temperature: 0.1,
+      roles
     });
     mergeUsage(aggregateUsage, next.usage);
     assistantMessage = next.choices?.[0]?.message;
@@ -1288,7 +1389,8 @@ async function runAgentSearch({ userMessages, qwenKey, tavilyKey, model, baseUrl
     model,
     messages,
     toolChoice: "none",
-    temperature: 0.1
+    temperature: 0.1,
+    roles
   });
   mergeUsage(aggregateUsage, finalWithoutTools.usage);
   const finalMessage = finalWithoutTools.choices?.[0]?.message;
@@ -1498,6 +1600,7 @@ app.post("/api/ask", async (req, res) => {
     const reviewModel = usedAnswerMode === "precise" ? "qwen-plus" : usedModel;
     let usedSearchMode = searchMode || (useSearch ? "force" : "off");
     const latestQuestion = normalizedMessages[normalizedMessages.length - 1]?.content || "";
+    const selectedRoles = selectAgentRoles(latestQuestion);
 
     if (usedAnswerMode === "precise" && isHighRiskQuestion(latestQuestion) && !tavilyKey) {
       return res.status(400).json({
@@ -1522,7 +1625,8 @@ app.post("/api/ask", async (req, res) => {
       model: usedModel,
       baseUrl: usedBaseUrl,
       searchMode: usedSearchMode,
-      answerMode: usedAnswerMode
+      answerMode: usedAnswerMode,
+      roles: selectedRoles
     });
 
     if (shouldSelfCheck({ searchMode: usedSearchMode, userMessages: normalizedMessages, answerMode: usedAnswerMode })) {
@@ -1533,7 +1637,8 @@ app.post("/api/ask", async (req, res) => {
         userMessages: normalizedMessages,
         qwenKey,
         model: reviewModel,
-        baseUrl: usedBaseUrl
+        baseUrl: usedBaseUrl,
+        roles: selectedRoles
       });
       result.reply = checked.reply;
       mergeUsage(result.usage, checked.usage);
@@ -1549,7 +1654,8 @@ app.post("/api/ask", async (req, res) => {
         userMessages: normalizedMessages,
         qwenKey,
         model: usedModel,
-        baseUrl: usedBaseUrl
+        baseUrl: usedBaseUrl,
+        roles: selectedRoles
       });
       result.reply = repaired.reply;
       mergeUsage(result.usage, repaired.usage);
@@ -1597,7 +1703,8 @@ app.post("/api/ask", async (req, res) => {
         answerMode: usedAnswerMode,
         steps: result.steps || [],
         sources: result.sources || [],
-        confidence
+        confidence,
+        roles: selectedRoles
       })
     });
   } catch (error) {
