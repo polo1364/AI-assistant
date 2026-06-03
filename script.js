@@ -733,12 +733,26 @@ async function clearHistory() {
 }
 
 function escapeHtml(s) {
-  return String(s ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  return String(s ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#039;");
 }
 
 function renderMarkdown(md) {
+  const input = String(md || "");
+  if (typeof marked !== "undefined" && typeof DOMPurify !== "undefined") {
+    marked.setOptions({
+      breaks: true,
+      gfm: true
+    });
+    return DOMPurify.sanitize(marked.parse(input));
+  }
+
   const codeBlocks = [];
-  let text = md.replace(/```(\w*)\n?([\s\S]*?)```/g, (m, lang, code) => {
+  let text = input.replace(/```(\w*)\n?([\s\S]*?)```/g, (m, lang, code) => {
     const i = codeBlocks.length;
     codeBlocks.push(`<pre><code>${escapeHtml(code.replace(/\n$/, ""))}</code></pre>`);
     return `\u0000CODE${i}\u0000`;
@@ -828,7 +842,7 @@ function addMessage(role, text, sources, steps, confidence) {
 
   const body = document.createElement("div");
   if (role === "ai") {
-    body.className = "md";
+    body.className = "ai-content";
     body.innerHTML = renderMarkdown(text);
   } else {
     body.textContent = text;
@@ -838,7 +852,7 @@ function addMessage(role, text, sources, steps, confidence) {
   if (role === "ai") {
     if (confidence && confidence.label) {
       const box = document.createElement("div");
-      box.className = `confidence-card confidence-${confidence.level || "medium"}`;
+      box.className = `confidence confidence-${confidence.level || "medium"}`;
       const title = document.createElement("div");
       title.className = "confidence-title";
       title.textContent = `可信度：${confidence.label}`;
@@ -855,23 +869,25 @@ function addMessage(role, text, sources, steps, confidence) {
       box.className = "sources";
       const title = document.createElement("div");
       title.className = "sources-title";
-      title.textContent = "來源：";
+      title.textContent = "來源";
       box.appendChild(title);
-      sources.forEach((src) => {
+      sources.forEach((src, index) => {
         if (!src || !src.url) return;
         const a = document.createElement("a");
         a.className = "source-card";
         a.href = src.url;
         a.target = "_blank";
         a.rel = "noopener noreferrer";
-        const badge = document.createElement("span");
-        badge.className = `source-badge ${src.official ? "official" : "third-party"}`;
-        badge.textContent = src.official ? "官方" : "第三方";
+        const meta = document.createElement("div");
+        meta.className = "source-meta";
+        meta.textContent = `${index + 1}. ${src.official ? "官方來源" : "第三方來源"}`;
         const name = document.createElement("strong");
+        name.className = "source-name";
         name.textContent = src.title || "未命名來源";
         const url = document.createElement("small");
+        url.className = "source-url";
         url.textContent = src.url;
-        a.appendChild(badge);
+        a.appendChild(meta);
         a.appendChild(name);
         a.appendChild(url);
         box.appendChild(a);
