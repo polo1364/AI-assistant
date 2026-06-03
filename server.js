@@ -13,24 +13,35 @@ app.use(express.json({ limit: "1mb" }));
 app.use(express.static(path.join(__dirname)));
 
 const PROJECT_FACTS = {
-  title: "蝦蝦AI助理",
+  title: "蝦蝦 Agent 助理",
   frontend: "原生 HTML/CSS/JavaScript",
   backend: "Node.js + Express",
-  endpoint: "/api/ask",
+  mainMode: "自動 Agent 工作流程",
+  researchEndpoint: "/api/ask",
+  agentEndpoints: [
+    "/api/plan",
+    "/api/execute",
+    "/api/confirm-write",
+    "/api/runtime"
+  ],
   qwenBaseUrl: "https://dashscope-intl.aliyuncs.com/compatible-mode/v1",
   qwenModels: ["qwen-flash", "qwen3.5-flash", "qwen-plus", "qwen3-max"],
   defaultModel: "qwen-flash",
   tavilyMode: "/search",
+  tavilyExtractMode: "/extract",
   deployment: "Railway",
   files: ["index.html", "style.css", "script.js", "server.js", "package.json"],
-  keyFlow: "API Key 由前端 modal 自填並存在 localStorage，每次請求傳給 Express 代理；後端只轉發使用，不落地儲存。",
+  keyFlow: "API Key 由前端設定輸入並存在瀏覽器端；每次請求傳給 Express 代理；後端只轉發使用，不落地儲存。",
   constraints: [
     "不使用 React/Vue",
     "不使用 LangChain",
     "不使用 /api/chat",
     "不使用 /api/search",
-    "不使用 .env 儲存 API Key",
-    "目前只支援文字輸入，不支援圖片、語音或多模態"
+    "不使用 .env 儲存使用者 API Key",
+    "目前只支援文字任務，不支援圖片、語音或多模態",
+    "工作 Agent 只允許專案內指定副檔名檔案操作",
+    "write_file 必須先產生 diff，使用者確認後才寫入",
+    "GitHub 寫入功能未完成前，不自動修改遠端 repo"
   ]
 };
 
@@ -281,10 +292,13 @@ function projectFactsText() {
     `本專案名稱：${PROJECT_FACTS.title}`,
     `前端：${PROJECT_FACTS.frontend}`,
     `後端：${PROJECT_FACTS.backend}`,
-    `唯一後端端點：${PROJECT_FACTS.endpoint}`,
+    `主要模式：${PROJECT_FACTS.mainMode}`,
+    `內部查證端點：${PROJECT_FACTS.researchEndpoint}`,
+    `Agent 工作端點：${PROJECT_FACTS.agentEndpoints.join(", ")}`,
     `Qwen 預設 Base URL：${PROJECT_FACTS.qwenBaseUrl}`,
     `模型選項：${PROJECT_FACTS.qwenModels.join(", ")}；預設 ${PROJECT_FACTS.defaultModel}`,
-    `Tavily 預設模式：${PROJECT_FACTS.tavilyMode}`,
+    `Tavily 搜尋模式：${PROJECT_FACTS.tavilyMode}`,
+    `Tavily 擷取模式：${PROJECT_FACTS.tavilyExtractMode}`,
     `部署平台：${PROJECT_FACTS.deployment}`,
     `檔案結構：${PROJECT_FACTS.files.join(", ")} 位於同一層`,
     `Key 流程：${PROJECT_FACTS.keyFlow}`,
@@ -297,7 +311,7 @@ const AGENT_OPERATING_PRINCIPLES = [
   "回答原則：有官方來源、使用者提供內容或本專案固定事實支撐時才下肯定結論；沒有足夠證據時要明確說明不足。",
   "查證原則：涉及價格、計費、API、政策、部署、安全、法律、醫療、投資或最新資訊時，必須優先官方來源；官方與第三方衝突時以官方為準。",
   "來源原則：若已有官方來源能支撐主要結論，不要因混入第三方來源就整題拒答；應標示以官方來源為準，第三方只作補充。",
-  "保守原則：高風險問題沒有官方來源或明確證據時，不硬答、不猜測，改為說明需要官方資料或開啟查證模式。",
+  "保守原則：高風險問題完全沒有來源時不硬答；若只有第三方來源，可以低可信度整理參考並明確提醒需人工確認。",
   "工作 Agent 原則：低風險可讀取與整理；中風險如建立或修改檔案必須先顯示計畫與 diff，等待使用者確認；高風險如刪除、部署、寄信、付款、任意指令第一版禁止或需二次確認。",
   "安全原則：不讀取 .env、密碼、cookie、憑證、API Key 或專案外路徑；不自動刪檔、不自動部署、不自動寄信、不自動執行任意命令。",
   "輸出原則：先給結論，再給依據、風險與下一步；若是修改建議，必須偏向最小改動與可確認差異。"
@@ -397,10 +411,10 @@ const SYSTEM_PROMPT =
   "只有當問題需要最新資訊、查證事實、價格、新聞、即時資料或指定網頁資訊時，才使用 web_search 工具。" +
   "涉及官方 API、模型、定價、文件、部署或產品能力時，必須優先使用官方文件；官方來源與第三方來源衝突時，以官方來源為準。" +
   `本專案事實（不可違反）：${projectFactsText()}` +
-  "前端呼叫的後端端點是 /api/ask，不是 /api/chat；Qwen/Tavily Key 由使用者在前端 modal 自填並存在 localStorage；每次請求會把 Key 傳給自己的 Express 代理後端，由後端呼叫 Qwen/Tavily；伺服器只轉發使用，不落地儲存 Key，也不需要 .env 放 API Key；Tavily 直接用 REST API，不使用 LangChain。" +
+  "本專案保留 /api/ask 作為內部查證與研究引擎，不使用 /api/chat；任務型工作流程主要走 /api/plan、/api/execute、/api/confirm-write 與 /api/runtime。Qwen/Tavily Key 由使用者在前端 modal 自填並存在瀏覽器端；每次請求會把 Key 傳給自己的 Express 代理後端，由後端呼叫 Qwen/Tavily；伺服器只轉發使用，不落地儲存 Key，也不需要 .env 放使用者 API Key；Tavily 直接用 REST API，不使用 LangChain。" +
   "本專案檔案位於同一層，不是 frontend/backend 分離架構；index.html、style.css、script.js、server.js、package.json 都在同一個專案資料夾。Railway 部署時應直接部署含 package.json 的資料夾；若 GitHub repo 外層還有資料夾，才把 Root Directory 設為 qwen-ai-assistant，不要建議 /frontend 或 /backend。" +
-  "目前 UI 是文字聊天介面，不支援圖片、語音或多模態輸入，不要宣稱本專案支援多模態。現在模型選項為 qwen-flash、qwen3.5-flash、qwen-plus、qwen3-max；預設低成本建議是 qwen-flash，需要更強再切換。" +
-  "本專案目前只有 /api/ask 端點；/api/ask 已同時處理 Qwen 回答、Tavily 搜尋、自動 agent 流程、來源整理與 usage 回傳。不要建議新增 /api/search，除非使用者明確要求獨立搜尋 API。" +
+  "目前 UI 是文字任務與研究介面，不支援圖片、語音或多模態輸入，不要宣稱本專案支援多模態。現在模型選項為 qwen-flash、qwen3.5-flash、qwen-plus、qwen3-max；預設低成本建議是 qwen-flash，需要更強再切換。" +
+  "本專案已有 /api/ask、/api/plan、/api/execute、/api/confirm-write、/api/runtime；/api/ask 負責 Qwen 回答、Tavily 搜尋、自動 agent 查證、來源整理與 usage 回傳。不要建議新增 /api/search，除非使用者明確要求獨立搜尋 API。" +
   "關於 Key 安全，不要說 localStorage 完全安全或符合完整安全原則；應說第一版方便可用，但需注意 XSS、公用裝置與瀏覽器儲存風險，正式版可考慮後端 session、帳號制、短期 token 或加密儲存。" +
   "關於後端 Map 暫存 token→Key：不要把它列為最低成本首選、零風險方案或不改架構方案。這代表後端會暫存使用者 API Key，只能列為進階方案，且必須說明 Railway 重啟會失效、多實例不共享、記憶體外洩或錯誤 log 仍有風險、XSS 仍可能竊取短期 token 並在有效期內濫用。" +
   "Key 安全題的低成本第一版優先建議：CSP、防 XSS、禁止第三方 script、維持 HTML escape/Markdown sanitization、清除 Key 按鈕、公用裝置提醒、sessionStorage 或不記住 Key 選項、縮短本機保存時間。" +
@@ -487,7 +501,8 @@ const OFFICIAL_DOMAINS = {
     "platform.stability.ai"
   ],
   github: [
-    "github.com"
+    "github.com",
+    "docs.github.com"
   ],
   npm: [
     "npmjs.com"
@@ -517,9 +532,9 @@ function classifySearch(query) {
   if (/replicate/i.test(q)) profiles.push("replicate");
   if (/fal\.ai|fal ai|fal/i.test(q)) profiles.push("fal");
   if (/stability|stable diffusion|sdxl|sd3/i.test(q)) profiles.push("stability");
-  if (/github|repo|repository/i.test(q)) profiles.push("github");
-  if (/npm|package/i.test(q)) profiles.push("npm");
-  if (/mdn|html|css|javascript|web api/i.test(q)) profiles.push("mdn");
+  if (/github|repo|repository|pull request|commit|branch/i.test(q)) profiles.push("github");
+  if (/npm|package|node package/i.test(q)) profiles.push("npm");
+  if (/mdn|html|css|javascript|web api|dom/i.test(q)) profiles.push("mdn");
 
   const domains = [...new Set(profiles.flatMap((p) => OFFICIAL_DOMAINS[p] || []))];
   const officialPreferred = domains.length > 0;
@@ -724,12 +739,23 @@ function stripInlineSources(reply) {
     .trim();
 }
 
-function validateAnswer(reply) {
+function isProjectQuestion(text) {
+  return /本專案|這個專案|目前專案|這專案|蝦蝦|本工具|這個助理|我的助理|qwen-ai-assistant|AI-assistant|\/api\/ask|Railway.*本專案|localStorage.*Key/i.test(String(text || ""));
+}
+
+function validateAnswer(reply, userMessages = []) {
   const text = String(reply || "");
+  const latest = userMessages?.[userMessages.length - 1]?.content || "";
+  const projectScoped = isProjectQuestion(latest) || isProjectQuestion(text);
   const violations = [];
+
+  if (!projectScoped) {
+    return violations;
+  }
+
   const checks = [
-    [/\/api\/chat/i, "本專案端點是 /api/ask，不是 /api/chat。"],
-    [/\/api\/search/i, "本專案目前不使用 /api/search；/api/ask 已處理搜尋與回答。"],
+    [/\/api\/chat/i, "本專案保留 /api/ask 作為內部查證端點，並使用 /api/plan、/api/execute、/api/confirm-write、/api/runtime 作為 Agent 工作端點，不使用 /api/chat。"],
+    [/\/api\/search/i, "本專案目前不使用 /api/search；/api/ask 已處理搜尋與回答，Tavily 由後端直接呼叫。"],
     [/\bReact\b|\bVue\b/i, "本專案前端是原生 HTML/CSS/JavaScript，不使用 React/Vue。"],
     [/LangChain|@langchain/i, "本專案直接呼叫 Tavily REST API，不使用 LangChain。"],
     [/frontend|backend|\/frontend|\/backend/i, "本專案不是 frontend/backend 分離架構，檔案位於同一層。"],
@@ -787,15 +813,23 @@ function buildConfidence({ sources, violations, searchCount, userMessages }) {
     return {
       level: "high",
       label: "高",
-      reason: `此問題屬於高變動或高風險資訊，已使用 ${officialCount} 個官方來源。`
+      reason: `此問題屬於高風險或高變動資訊，已使用 ${officialCount} 個官方來源。`
     };
   }
 
-  if (highRisk && officialCount === 0) {
+  if (highRisk && officialCount === 0 && sourceCount > 0) {
     return {
       level: "low",
       label: "低",
-      reason: "此問題需要官方來源或明確證據，但目前沒有官方來源。"
+      reason: `此問題沒有官方來源，但已找到 ${sourceCount} 個第三方來源；可先整理參考，但建議人工確認。`
+    };
+  }
+
+  if (highRisk && sourceCount === 0) {
+    return {
+      level: "low",
+      label: "低",
+      reason: "此問題需要來源佐證，但目前沒有找到可用來源。"
     };
   }
 
@@ -803,7 +837,7 @@ function buildConfidence({ sources, violations, searchCount, userMessages }) {
     return {
       level: "medium",
       label: "中",
-      reason: `使用 ${sourceCount} 個來源，但官方來源不足，需視內容人工確認。`
+      reason: `使用 ${sourceCount} 個來源整理，仍建議確認重要資訊。`
     };
   }
   return {
@@ -845,7 +879,7 @@ function getProjectFactAnswer(userMessages) {
 
   if (/後端.*端點|端點.*後端|API.*端點|endpoint/i.test(latest)) {
     return {
-      reply: `本專案後端端點是 \`${PROJECT_FACTS.endpoint}\`。`,
+      reply: `本專案保留內部查證端點 \`${PROJECT_FACTS.researchEndpoint}\`，任務型 Agent 工作流程使用 \`${PROJECT_FACTS.agentEndpoints.join("`、`")}\`。`,
       fact: "backend_endpoint"
     };
   }
@@ -861,7 +895,7 @@ function getProjectFactAnswer(userMessages) {
     return {
       reply:
         "結論：在本專案中，Qwen 負責核心文字理解、整理與回答；Tavily 負責即時網路搜尋與外部資料補充；Railway 負責部署這個 Node.js + 前端專案並提供線上網址。\n\n" +
-        `依據：前端透過 \`${PROJECT_FACTS.endpoint}\` 呼叫 Express 後端；後端依需求把對話送到 Qwen，若需要查資料則呼叫 Tavily REST API 的 \`${PROJECT_FACTS.tavilyMode}\`；整個專案部署目標是 ${PROJECT_FACTS.deployment}。\n\n` +
+        `依據：前端可透過 \`${PROJECT_FACTS.researchEndpoint}\` 做內部查證，也可透過 \`${PROJECT_FACTS.agentEndpoints.join("`、`")}\` 執行計畫、產生 diff 與確認寫入；後端依需求把任務送到 Qwen，若需要查資料則呼叫 Tavily REST API 的 \`${PROJECT_FACTS.tavilyMode}\` 與 \`${PROJECT_FACTS.tavilyExtractMode}\`；整個專案部署目標是 ${PROJECT_FACTS.deployment}。\n\n` +
         "風險：Qwen 模型可用性仍需用實際 API Key 測試帳號權限、地區端點與模型是否開通；Tavily 實際額度以官方後台為準；API Key 存在瀏覽器 localStorage，需注意 XSS 與公用裝置風險。\n\n" +
         "建議下一步：部署後測試線上網址是否能正常呼叫 Qwen；開啟查證或高準確模式測試 Tavily 來源顯示；確認設定視窗的清除 Key 功能與用量面板都能正常使用。",
       fact: "service_roles"
@@ -917,10 +951,10 @@ function shouldRefuseOrDefer({ sources, searchMode, userMessages, violations }) 
     };
   }
 
-  if (highRisk && searchMode !== "off" && !hasOfficial) {
+  if (highRisk && searchMode !== "off" && !hasSources) {
     return {
       defer: true,
-      reason: "這題需要官方來源或明確證據，但目前沒有取得官方來源。"
+      reason: "這題需要官方來源或明確證據，但目前沒有取得可用來源。"
     };
   }
 
@@ -1133,23 +1167,28 @@ function sourceSummary(sources) {
 
 async function selfCheckAnswer({ reply, sources, userMessages, qwenKey, model, baseUrl, roles }) {
   const latest = userMessages[userMessages.length - 1]?.content || "";
+  const projectRules = isProjectQuestion(latest)
+    ? [
+        "3. 本專案保留 /api/ask 作為內部查證端點，不使用 /api/chat；任務型 Agent 工作流程使用 /api/plan、/api/execute、/api/confirm-write 與 /api/runtime。",
+        "4. 本專案不用 React/Vue、不用 LangChain、不用 .env 存 API Key。",
+        "5. Key 流程是前端 localStorage 保存，每次請求傳給 Express 代理，後端只轉發不儲存。",
+        "6. Railway 支援公開網址、自訂網域與 HTTPS/SSL，不要寫成不支援或無 SSL。",
+        "7. Tavily 用量不要寫成 Qwen token usage；本專案以搜尋次數估算，實際額度以 Tavily 後台為準。",
+        "8. 不要說 qwen-flash 無法確認是否兼容；應改為提醒測試帳號權限、地區端點與模型可用性。",
+        "9. 不要建議把 /api/ask 改成 OpenAI-compatible 格式，因為目前已是該格式；只能建議確認 baseUrl、model、messages、Authorization header。",
+        "10. 不要把 Tavily /research 列為必要下一步；/research 僅是進階選項，預設用 /search 控成本。",
+        "11. 不要把『後端記憶體或 Map 暫存 token→Key』說成最低成本首選、成本接近零、零風險、不改架構或完全安全；只能列為進階方案，並說明後端會暫存使用者 API Key、Railway 重啟失效、多實例不共享或需 Redis/session store、記憶體外洩/log/debug dump 風險、token 仍可能被 XSS 盜用並在有效期內濫用。Key 安全低成本第一版優先 CSP、防 XSS、禁止第三方 script、清除 Key、公用裝置提醒、sessionStorage/不記住 Key、縮短本機保存時間。"
+      ].join("\n") + "\n"
+    : "";
   const checkPrompt =
     "請做最終自我檢查並直接輸出修正版回答，不要輸出檢查過程。\n" +
     "檢查規則：\n" +
     "1. 結論必須被來源或本專案現況支撐；沒有支撐就改成保守說法。\n" +
     "2. 不要把第三方來源當官方結論；官方與第三方衝突時以官方為準。\n" +
-    "3. 本專案固定使用 /api/ask，不是 /api/chat。\n" +
-    "4. 本專案不用 React/Vue、不用 LangChain、不用 .env 存 API Key。\n" +
-    "5. Key 流程是前端 localStorage 保存，每次請求傳給 Express 代理，後端只轉發不儲存。\n" +
-    "6. 若是架構/部署/API 題，使用「結論、依據、風險、建議下一步」格式。\n" +
-    "7. Railway 支援公開網址、自訂網域與 HTTPS/SSL，不要寫成不支援或無 SSL。\n" +
-    "8. Tavily 用量不要寫成 Qwen token usage；本專案以搜尋次數估算，實際額度以 Tavily 後台為準。\n" +
-    "9. 不確定、來源不足或可能變動的內容請改成保守說法，不要下絕對結論。\n" +
-    "10. 不要說 qwen-flash 無法確認是否兼容；應改為提醒測試帳號權限、地區端點與模型可用性。\n" +
-    "11. 不要建議把 /api/ask 改成 OpenAI-compatible 格式，因為目前已是該格式；只能建議確認 baseUrl、model、messages、Authorization header。\n" +
-    "12. 不要把 Tavily /research 列為必要下一步；/research 僅是進階選項，預設用 /search 控成本。\n" +
-    "13. 不要把『後端記憶體或 Map 暫存 token→Key』說成最低成本首選、成本接近零、零風險、不改架構或完全安全；只能列為進階方案，並說明後端會暫存使用者 API Key、Railway 重啟失效、多實例不共享或需 Redis/session store、記憶體外洩/log/debug dump 風險、token 仍可能被 XSS 盜用並在有效期內濫用。Key 安全低成本第一版優先 CSP、防 XSS、禁止第三方 script、清除 Key、公用裝置提醒、sessionStorage/不記住 Key、縮短本機保存時間。\n" +
-    "14. 不要在正文列出來源段落或網址；系統會在下方顯示來源。\n\n" +
+    projectRules +
+    "3. 若是查證、比較、架構、部署、API、計費或決策題，使用「先說結論、我查到的重點、需要注意、建議你下一步」格式。\n" +
+    "4. 不確定、來源不足或可能變動的內容請改成保守說法，不要下絕對結論。\n" +
+    "5. 不要在正文列出來源段落或網址；系統會在下方顯示來源。\n\n" +
     `使用者問題：\n${latest}\n\n` +
     `目前來源：\n${sourceSummary(sources)}\n\n` +
     `待檢查回答：\n${reply}`;
@@ -1409,11 +1448,11 @@ app.post("/api/plan", async (req, res) => {
   try {
     const { goal } = req.body || {};
     if (!String(goal || "").trim()) {
-      return res.status(400).json({ error: "缺少工作目標。" });
+      return res.status(400).json({ error: "缺少任務目標。" });
     }
     if (isSensitiveWorkRequest(goal)) {
       return res.status(400).json({
-        error: "這個工作目標涉及讀取敏感檔案或憑證資訊，工作 Agent 第一版不允許規劃此類操作。"
+        error: "這個任務目標涉及讀取敏感檔案或憑證資訊，任務 Agent 第一版不允許規劃此類操作。"
       });
     }
 
@@ -1433,7 +1472,7 @@ app.post("/api/execute", async (req, res) => {
   try {
     const { goal, plan, qwenKey, model, baseUrl } = req.body || {};
     const workGoal = String(goal || plan?.goal || "").trim();
-    if (!workGoal) return res.status(400).json({ error: "缺少工作目標。" });
+    if (!workGoal) return res.status(400).json({ error: "缺少任務目標。" });
 
     const usedModel = model || "qwen-flash";
     const usedBaseUrl = baseUrl || "https://dashscope-intl.aliyuncs.com/compatible-mode/v1";
@@ -1644,7 +1683,7 @@ app.post("/api/ask", async (req, res) => {
       mergeUsage(result.usage, checked.usage);
     }
 
-    const violations = validateAnswer(result.reply);
+    const violations = validateAnswer(result.reply, normalizedMessages);
     if (violations.length > 0) {
       result.steps = [...(result.steps || []), `程式驗證發現 ${violations.length} 個事實風險，已要求重寫`];
       const repaired = await repairAnswer({
@@ -1661,7 +1700,7 @@ app.post("/api/ask", async (req, res) => {
       mergeUsage(result.usage, repaired.usage);
     }
 
-    const finalViolations = validateAnswer(result.reply);
+    const finalViolations = validateAnswer(result.reply, normalizedMessages);
     const deferCheck = usedAnswerMode === "fast" && !isHighRiskQuestion(latestQuestion)
       ? { defer: false, reason: "" }
       : shouldRefuseOrDefer({

@@ -612,7 +612,7 @@ function renderWorkResult(data) {
 async function createWorkPlan() {
   const goal = document.getElementById("workGoal").value.trim();
   if (!goal) {
-    alert("請先輸入工作目標。");
+    alert("請先輸入任務目標。");
     return;
   }
 
@@ -1152,7 +1152,7 @@ function resetConversation() {
   chatBox.innerHTML = "";
   const div = document.createElement("div");
   div.className = "message ai";
-  div.textContent = "已開始新對話。請輸入你想整理或查詢的內容。";
+  div.textContent = "已開始新任務。請輸入你想研究、整理或交給 Agent 規劃的目標。";
   chatBox.appendChild(div);
 }
 

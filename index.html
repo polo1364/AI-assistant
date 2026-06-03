@@ -3,18 +3,18 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>蝦蝦智能助理</title>
+  <title>蝦蝦 Agent 助理</title>
   <link rel="manifest" href="manifest.json" />
   <meta name="theme-color" content="#12091f" />
-  <link rel="stylesheet" href="style.css?v=agent-roles-1" />
+  <link rel="stylesheet" href="style.css?v=agent-task-1" />
 </head>
 <body>
   <div class="app">
     <header class="app-header">
       <div class="title-block">
         <div class="deck-badge">XiaXia Command Deck</div>
-        <h1>蝦蝦智能助理</h1>
-        <p>專屬任務控制台，整合查詢、整理與高準確回覆</p>
+        <h1>蝦蝦 Agent 助理</h1>
+        <p>輸入任務，讓 Agent 規劃、查證、產生 diff 並等待你確認</p>
       </div>
       <div class="header-actions">
         <button id="usageBtn" class="icon-btn" title="用量 / 花費">用量</button>
@@ -41,7 +41,7 @@
       </label>
       <div class="toolbar-actions">
         <button id="newChatBtn" class="chip-btn">新對話</button>
-        <button id="workAgentBtn" class="chip-btn">工作 Agent</button>
+        <button id="workAgentBtn" class="chip-btn">任務 Agent</button>
         <button id="resourcesBtn" class="chip-btn">資源</button>
         <button id="templatesBtn" class="chip-btn">模板</button>
         <button id="historyBtn" class="chip-btn">歷史</button>
@@ -50,13 +50,13 @@
 
     <main id="chatBox" class="chat-box">
       <div class="message ai">
-        指令艙已啟動。請輸入想整理、查詢或驗證的內容；需要最新資料時，可將搜尋模式切換為「自動」或「強制搜尋」。
+        任務控制台已啟動。你可以輸入研究問題取得查證整理，或打開「任務 Agent」讓它先產生計畫、再讀檔分析、最後由你確認是否套用 diff。
       </div>
     </main>
 
     <footer class="composer">
-      <textarea id="userInput" placeholder="輸入問題或貼上資料..."></textarea>
-      <button id="sendBtn" onclick="sendMessage()">送出</button>
+      <textarea id="userInput" placeholder="輸入任務目標、研究問題，或貼上需要整理的資料..."></textarea>
+      <button id="sendBtn" onclick="sendMessage()">研究</button>
     </footer>
   </div>
 
@@ -221,8 +221,8 @@
       </div>
       <div class="modal-body">
         <label class="field">
-          <span>工作目標</span>
-          <textarea id="workGoal" class="modal-textarea" placeholder="例如：幫我檢查 script.js 有沒有問題，並提出可確認的修改 diff。"></textarea>
+          <span>任務目標</span>
+          <textarea id="workGoal" class="modal-textarea" placeholder="例如：幫我優化 server.js 的 Tavily 搜尋策略，避免查不到資料，並保留官方與第三方來源。"></textarea>
         </label>
         <p class="hint">第一版只操作本專案檔案。Agent 會先產生計畫與 diff，必須按「確認寫入」才會修改檔案。</p>
         <div id="workRuntimeBox" class="work-runtime">正在確認目前後端位置...</div>
@@ -255,6 +255,6 @@
 
   <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/dompurify@3.1.6/dist/purify.min.js"></script>
-  <script src="script.js?v=agent-roles-1"></script>
+  <script src="script.js?v=agent-task-1"></script>
 </body>
 </html>

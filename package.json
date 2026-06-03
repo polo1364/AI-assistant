@@ -1,11 +1,12 @@
 {
-  "name": "qwen-ai-assistant",
+  "name": "xiaxia-agent-assistant",
   "version": "1.0.0",
-  "description": "Mobile/Desktop AI Assistant with Qwen API and Tavily web search (key-in-browser + minimal proxy)",
+  "description": "Xiaxia Auto Agent Assistant",
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
-    "dev": "node server.js"
+    "dev": "node server.js",
+    "check": "node --check server.js"
   },
   "engines": {
     "node": ">=18"
