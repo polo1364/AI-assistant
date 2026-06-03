@@ -302,8 +302,12 @@ const AGENT_OPERATING_PRINCIPLES = [
 
 const AGENT_RESOURCE_GUIDE = [
   "可用學習資源：Datawhale Hello-Agents 是系統性智能體教程，涵蓋智能體概念、LLM 基礎、ReAct、Plan-and-Solve、Reflection、低代碼平台、AutoGen/AgentScope/LangGraph、自研 Agent 框架、Memory/RAG、上下文工程、MCP/A2A/ANP、Agentic-RL、性能評估、智能旅行助手、DeepResearch Agent、WebAgent、Agent Skills 與 Skill 寫作。",
+  "可用角色資源：jnMetaCode/agency-agents-zh 是中文 AI 專家角色庫，包含約 215 個即插即用角色，涵蓋工程、設計、行銷、產品、專案管理、測試、支援、金融、法務、供應鏈、遊戲、特殊專家等部門；可作為子 Agent、人設提示詞、審查角色或工作流分工的參考。",
+  "agency-agents-zh 特別適合：需要前端開發者、後端架構師、安全工程師、程式碼審查員、UI/UX 設計師、小紅書/抖音/微信營運、SEO、產品經理、API 測試員、效能測試、無障礙審核、合規審計、智能體編排者或提示詞工程師時，推薦使用資源面板查找對應角色。",
+  "Agency Orchestrator 可作為未來多角色協作參考：自動選角、DAG 工作流、並行執行、斷點續跑與模板化交付；但本專案目前尚未實作完整多 Agent 編排，只可作為設計參考。",
   "當使用者詢問 Agent 學習路線、架構設計、工具系統、記憶、上下文、MCP、評估、多智能體或 DeepResearch 時，可以推薦工具列「資源」面板中的 Hello-Agents 精選資源。",
-  "推薦資源時請說明適合用途，不要宣稱本專案已完整實作所有 Hello-Agents 內容；本專案目前只實作聊天查證、來源整理、半自動工作 Agent、確認寫入與安全限制。"
+  "當使用者詢問子 Agent 角色、專家分工、角色提示詞、Cursor/Claude Code/Copilot 角色庫或工作流角色設計時，可以推薦工具列「資源」面板中的 agency-agents-zh 精選資源。",
+  "推薦資源時請說明適合用途，不要宣稱本專案已完整實作 Hello-Agents 或 agency-agents-zh 的全部內容；本專案目前只實作聊天查證、來源整理、半自動工作 Agent、確認寫入與安全限制。"
 ].join("\n");
 
 const SYSTEM_PROMPT =

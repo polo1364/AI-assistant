@@ -114,6 +114,54 @@ const AGENT_RESOURCES = [
     title: "如何寫出好的 Skill",
     desc: "適合未來把你的助理能力拆成可重用技能，例如查證、改檔、產報告。",
     url: "https://github.com/datawhalechina/hello-agents/blob/main/Extra-Chapter/Extra08-%E5%A6%82%E4%BD%95%E5%86%99%E5%87%BA%E5%A5%BD%E7%9A%84Skill.md"
+  },
+  {
+    category: "角色庫",
+    title: "agency-agents-zh 中文 AI 專家角色庫",
+    desc: "215 個即插即用專家角色，涵蓋工程、設計、行銷、產品、測試、安全、金融等部門，可作為子 Agent 或提示詞角色參考。",
+    url: "https://github.com/jnMetaCode/agency-agents-zh"
+  },
+  {
+    category: "角色索引",
+    title: "agency-agents 角色總表",
+    desc: "快速查找全部專家角色與適用場景，適合決定某個任務要由哪種專家 Agent 處理。",
+    url: "https://github.com/jnMetaCode/agency-agents-zh/blob/main/AGENT-LIST.md"
+  },
+  {
+    category: "工程角色",
+    title: "工程部：前端、後端、安全、DevOps、架構",
+    desc: "可參考前端開發者、後端架構師、安全工程師、程式碼審查員、SRE 等角色，強化工作 Agent 的改檔與審查能力。",
+    url: "https://github.com/jnMetaCode/agency-agents-zh/tree/main/engineering"
+  },
+  {
+    category: "設計角色",
+    title: "設計部：UI / UX / 品牌 / 圖像提示詞",
+    desc: "適合用於你的專屬 UI、品牌風格、可用性檢查與圖片提示詞優化。",
+    url: "https://github.com/jnMetaCode/agency-agents-zh/tree/main/design"
+  },
+  {
+    category: "行銷角色",
+    title: "行銷部：小紅書、抖音、微信、SEO、內容策略",
+    desc: "適合產生社群貼文、短影音腳本、品牌內容、SEO 與本地化行銷策略。",
+    url: "https://github.com/jnMetaCode/agency-agents-zh/tree/main/marketing"
+  },
+  {
+    category: "測試角色",
+    title: "測試部：API 測試、效能、無障礙、證據收集",
+    desc: "可用來設計測試案例、檢查 UI 截圖、驗證 API 與建立品質把關流程。",
+    url: "https://github.com/jnMetaCode/agency-agents-zh/tree/main/testing"
+  },
+  {
+    category: "特殊專家",
+    title: "Specialized：智能體編排、提示詞、合規、資料整合",
+    desc: "適合參考多 Agent 編排、提示詞工程、合規審計與資料整合等進階能力。",
+    url: "https://github.com/jnMetaCode/agency-agents-zh/tree/main/specialized"
+  },
+  {
+    category: "編排工具",
+    title: "Agency Orchestrator",
+    desc: "讓多個專家角色像團隊一樣協作，支援自然語言或 YAML 編排，可作為未來工作 Agent 多角色協作參考。",
+    url: "https://github.com/jnMetaCode/agency-orchestrator"
   }
 ];
 
